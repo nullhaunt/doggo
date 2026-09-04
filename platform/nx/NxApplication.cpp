@@ -1,12 +1,12 @@
 #include "NxApplication.hpp"
 
+#include <switch.h>
+
 namespace doggo::platform::nx
 {
     NxApplication::NxApplication() noexcept
     {
         consoleInit( nullptr );
-        padConfigureInput( 1, HidNpadStyleSet_NpadStandard );
-        padInitializeDefault( &mPad );
     }
 
     NxApplication::~NxApplication()
@@ -22,14 +22,6 @@ namespace doggo::platform::nx
     bool NxApplication::pumpEvents() noexcept
     {
         if ( !appletMainLoop() )
-        {
-            return false;
-        }
-
-        padUpdate( &mPad );
-
-        const u64 buttonsDown = padGetButtonsDown( &mPad );
-        if ( buttonsDown & HidNpadButton_Plus )
         {
             return false;
         }

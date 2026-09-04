@@ -3,5 +3,6 @@
 int main()
 {
     doggo::platform::windows::WindowsApplication host;
-    return doggo::run( host );
+    doggo::input::NullBackend                    input;
+    return doggo::run( host, input );
 }

@@ -6,7 +6,7 @@
 
 namespace doggo
 {
-    int run( platform::ApplicationHost & host )
+    int run( platform::ApplicationHost & host, input::Backend & input )
     {
         logging::info( "Application", "{}", getDescription() );
         logging::info( "Application", "Platform: {}", host.getPlatformName() );
@@ -15,7 +15,16 @@ namespace doggo
         time::FrameTimer frameTimer;
         while ( host.pumpEvents() )
         {
+            input.update();
             frameTimer.tick();
+
+            const input::State & state = input.getState();
+
+            if ( state.wasPressed( input::Button::Start ) )
+            {
+                logging::info( "Application", "Exit requested" );
+                break;
+            }
         }
 
         return 0;

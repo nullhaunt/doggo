@@ -2,6 +2,8 @@
 
 #include <string_view>
 
+#include "Input.hpp"
+
 namespace doggo::platform
 {
     class ApplicationHost
@@ -23,5 +25,5 @@ namespace doggo::platform
 
 namespace doggo
 {
-    [[nodiscard]] int run( platform::ApplicationHost & host );
+    [[nodiscard]] int run( platform::ApplicationHost & host, input::Backend & input );
 }

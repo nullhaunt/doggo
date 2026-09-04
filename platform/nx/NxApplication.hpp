@@ -1,7 +1,5 @@
 #pragma once
 
-#include <switch.h>
-
 #include "Application.hpp"
 
 namespace doggo::platform::nx
@@ -14,8 +12,5 @@ namespace doggo::platform::nx
 
         [[nodiscard]] std::string_view getPlatformName() const noexcept override;
         [[nodiscard]] bool             pumpEvents() noexcept override;
-
-      private:
-        PadState mPad = {};
     };
 } // namespace doggo::platform::nx

@@ -9,6 +9,7 @@ target_link_libraries(
         doggo
         PRIVATE
         doggo::platform_application
+        doggo::platform_input
         doggo::warnings
 )
 

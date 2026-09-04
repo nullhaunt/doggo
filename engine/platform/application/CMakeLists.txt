@@ -27,6 +27,7 @@ target_link_libraries(
         doggo_platform_application
         PUBLIC
         doggo::core
+        doggo::platform_input
         PRIVATE
         doggo::warnings
 )

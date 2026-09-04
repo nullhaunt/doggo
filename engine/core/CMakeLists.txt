@@ -1,0 +1,22 @@
+add_library(doggo_core STATIC)
+
+add_library(doggo::core ALIAS doggo_core)
+
+target_sources(
+        doggo_core
+        PRIVATE
+        Doggo.cpp
+        Doggo.hpp
+)
+
+target_include_directories(
+        doggo_core
+        PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+target_compile_features(
+        doggo_core
+        PUBLIC
+        cxx_std_20
+)

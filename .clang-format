@@ -23,6 +23,9 @@ AlignConsecutiveMacros:
   AlignFunctionPointers: true
   PadOperators: true
 AllowShortLambdasOnASingleLine: None
+BinPackArguments: false
+BinPackLongBracedList: false
+BinPackParameters: OnePerLine
 BraceWrapping:
   AfterCaseLabel: true
   AfterClass: true
@@ -45,6 +48,7 @@ BraceWrapping:
 BreakConstructorInitializers: BeforeComma
 IndentCaseLabels: true
 InsertBraces: true
+InsertNewlineAtEOF: true
 NamespaceIndentation: All
 PointerAlignment: Middle
 SpacesInParens: Custom

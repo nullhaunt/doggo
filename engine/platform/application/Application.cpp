@@ -1,20 +1,16 @@
 #include "Application.hpp"
 
-#include <format>
-#include <iostream>
-
 #include "Doggo.hpp"
+#include "logging/Log.hpp"
 #include "time/FrameTimer.hpp"
 
 namespace doggo
 {
     int run( platform::ApplicationHost & host )
     {
-        std::cout << std::format( "{}\n"
-                                  "{}\n\n"
-                                  "Platform: {}\n\n"
-                                  "DOGGO bootstrap OK.",
-                                  getName(), getDescription(), host.getPlatformName() );
+        logging::info( "Application", "{}", getDescription() );
+        logging::info( "Application", "Platform: {}", host.getPlatformName() );
+        logging::info( "Application", "Bootstrap OK" );
 
         time::FrameTimer frameTimer;
         while ( host.pumpEvents() )

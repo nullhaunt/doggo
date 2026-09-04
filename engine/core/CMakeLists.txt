@@ -28,3 +28,4 @@ target_link_libraries(
 )
 
 add_subdirectory(time)
+add_subdirectory(logging)

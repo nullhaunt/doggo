@@ -5,9 +5,7 @@ namespace doggo::platform::nx
     NxApplication::NxApplication() noexcept
     {
         consoleInit( nullptr );
-
         padConfigureInput( 1, HidNpadStyleSet_NpadStandard );
-
         padInitializeDefault( &mPad );
     }
 
@@ -31,7 +29,6 @@ namespace doggo::platform::nx
         padUpdate( &mPad );
 
         const u64 buttonsDown = padGetButtonsDown( &mPad );
-
         if ( buttonsDown & HidNpadButton_Plus )
         {
             return false;

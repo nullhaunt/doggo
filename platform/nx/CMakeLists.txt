@@ -25,4 +25,7 @@ target_compile_features(
         cxx_std_20
 )
 
-nx_create_nro(doggo)
+nx_create_nro(
+        doggo
+        ROMFS doggo_nx_romfs
+)

@@ -18,10 +18,11 @@ namespace doggo::platform::nx::deko
         void               renderFrame() noexcept override;
 
       private:
-        static constexpr std::size_t   sFramebufferCount  = 2;
-        static constexpr std::uint32_t sFramebufferWidth  = 1280;
-        static constexpr std::uint32_t sFramebufferHeight = 720;
-        static constexpr std::uint32_t sCommandMemorySize = 16 * 1024;
+        static constexpr std::size_t   sFramebufferCount     = 2;
+        static constexpr std::uint32_t sFramebufferWidth     = 1280;
+        static constexpr std::uint32_t sFramebufferHeight    = 720;
+        static constexpr std::uint32_t sCommandMemorySize    = 16 * 1024;
+        static constexpr std::uint32_t sShaderCodeMemorySize = 64 * 1024;
 
         dk::UniqueDevice mDevice;
 
@@ -33,7 +34,14 @@ namespace doggo::platform::nx::deko
         dk::UniqueCmdBuf   mCommandBuffer;
 
         std::array<DkCmdList, sFramebufferCount> mBindFramebufferCommands = {};
-        DkCmdList                                mClearCommands           = {};
+        DkCmdList                                mRenderCommands          = {};
+
+        dk::UniqueMemBlock mShaderCodeMemory;
+        std::uint32_t      mShaderCodeOffset = 0;
+        dk::Shader         mVertexShader;
+        dk::Shader         mFragmentShader;
+
+        [[nodiscard]] bool loadShader( dk::Shader & shader, const char * path ) noexcept;
 
         dk::UniqueQueue mQueue;
 

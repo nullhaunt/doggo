@@ -3,4 +3,6 @@ target_sources(
         PRIVATE
         FrameHistory.cpp
         FrameHistory.hpp
+        CpuProfiler.cpp
+        CpuProfiler.hpp
 )

@@ -1,9 +1,9 @@
 #include "Application.hpp"
 
 #include "Doggo.hpp"
-#include "diagnostics/Assert.hpp"
 #include "logging/Log.hpp"
 #include "memory/LinearAllocator.hpp"
+#include "profiling/CpuProfiler.hpp"
 #include "profiling/FrameHistory.hpp"
 #include "time/FrameTimer.hpp"
 
@@ -39,6 +39,7 @@ namespace doggo
 
         time::FrameTimer        frameTimer;
         profiling::FrameHistory frameHistory;
+        profiling::CpuProfiler  cpuProfiler;
 
         while ( host.pumpEvents() )
         {
@@ -46,56 +47,83 @@ namespace doggo
             frameHistory.push( frameTimer.getDeltaTime() );
             frameArena.reset();
 
-            input.update();
-
-            if ( frameTimer.getFrameIndex() % TelemetryRefreshFrames == 0 )
+            cpuProfiler.beginFrame();
             {
-                const auto latest  = frameHistory.getLatest();
-                const auto average = frameHistory.getAverage();
-                const auto minimum = frameHistory.getMinimum();
-                const auto maximum = frameHistory.getMaximum();
+                profiling::CpuScope frameScope{ cpuProfiler, "CPU Frame" };
 
-                std::printf( "\x1b[2J"
-                             "\x1b[H"
-                             "DOGGO\n"
-                             "Data-Oriented Geometry & Gameplay Orchestrator\n"
-                             "\n"
+                {
+                    profiling::CpuScope inputScope{ cpuProfiler, "Input" };
+                    input.update();
+                }
 
-                             "FRAME\n"
-                             "\tIndex       : %llu\n"
-                             "\tCurrent     : %.3f ms\n"
-                             "\tAverage     : %.3f ms\n"
-                             "\tBest        : %.3f ms\n"
-                             "\tWorst       : %.3f ms\n"
-                             "\tAverage FPS : %.2f\n"
-                             "\n"
+                const input::State & state = input.getState();
 
-                             "FRAME MEMORY\n"
-                             "\tUsed        : %zu KiB\n"
-                             "\tPeak        : %zu KiB\n"
-                             "\tCapacity    : %zu KiB\n"
-                             "\n\n"
+                if ( state.wasPressed( input::Button::Start ) )
+                {
+                    logging::info( "Application", "Exit requested" );
+                    break;
+                }
 
-                             "Press (+) to exit.",
+                if ( frameTimer.getFrameIndex() % TelemetryRefreshFrames == 0 )
+                {
+                    const auto latest  = frameHistory.getLatest();
+                    const auto average = frameHistory.getAverage();
+                    const auto minimum = frameHistory.getMinimum();
+                    const auto maximum = frameHistory.getMaximum();
 
-                             static_cast<unsigned long long>( frameTimer.getFrameIndex() ),
-                             toMilliseconds( latest ),
-                             toMilliseconds( average ),
-                             toMilliseconds( minimum ),
-                             toMilliseconds( maximum ),
-                             frameHistory.getAverageFps(),
+                    std::printf( "\x1b[2J"
+                                 "\x1b[H"
+                                 "DOGGO\n"
+                                 "Data-Oriented Geometry & Gameplay Orchestrator\n"
+                                 "\n"
 
-                             frameArena.getUsed() / 1024u,
-                             frameArena.getPeakUsage() / 1024u,
-                             frameArena.getCapacity() / 1024u );
-            }
+                                 "FRAME\n"
+                                 " Index       : %llu\n"
+                                 " Current     : %.3f ms\n"
+                                 " Average     : %.3f ms\n"
+                                 " Best        : %.3f ms\n"
+                                 " Worst       : %.3f ms\n"
+                                 " Average FPS : %.2f\n"
+                                 "\n",
 
-            const input::State & state = input.getState();
+                                 static_cast<unsigned long long>( frameTimer.getFrameIndex() ),
+                                 toMilliseconds( latest ),
+                                 toMilliseconds( average ),
+                                 toMilliseconds( minimum ),
+                                 toMilliseconds( maximum ),
+                                 frameHistory.getAverageFps() );
 
-            if ( state.wasPressed( input::Button::Start ) )
-            {
-                logging::info( "Application", "Exit requested" );
-                break;
+                    std::printf( "CPU (PREVIOUS FRAME)\n" );
+
+                    for ( const profiling::CpuSample & sample : cpuProfiler.getLastFrameSamples() )
+                    {
+                        const int indentation = static_cast<int>( sample.mDepth * 2 );
+
+                        std::printf( "%*s%-12.*s : %.3f ms\n",
+                                     indentation,
+                                     "",
+                                     static_cast<int>( sample.mName.size() ),
+                                     sample.mName.data(),
+                                     toMilliseconds( sample.mDuration ) );
+                    }
+
+                    if ( cpuProfiler.hasLastFrameOverflowed() )
+                    {
+                        std::printf( "\nCPU PROFILE OVERFLOW\n" );
+                    }
+
+                    std::printf( "\nFRAME MEMORY\n"
+                                 " Used        : %zu KiB\n"
+                                 " Peak        : %zu KiB\n"
+                                 " Capacity    : %zu KiB\n"
+                                 "\n\n"
+
+                                 "Press (+) to exit.",
+
+                                 frameArena.getUsed() / 1024u,
+                                 frameArena.getPeakUsage() / 1024u,
+                                 frameArena.getCapacity() / 1024u );
+                }
             }
         }
 

@@ -20,3 +20,9 @@ target_compile_features(
         PUBLIC
         cxx_std_20
 )
+
+target_link_libraries(
+        doggo_core
+        PRIVATE
+        doggo::warnings
+)

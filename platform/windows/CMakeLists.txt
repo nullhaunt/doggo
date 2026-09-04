@@ -7,6 +7,7 @@ target_link_libraries(
         doggo
         PRIVATE
         doggo::core
+        doggo::warnings
 )
 
 target_compile_features(

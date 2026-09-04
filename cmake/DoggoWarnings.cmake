@@ -10,6 +10,14 @@ if (MSVC)
             /permissive-
             /Zc:__cplusplus
     )
+
+    if (DOGGO_WARNINGS_AS_ERRORS)
+        target_compile_options(
+                doggo_warnings
+                INTERFACE
+                /WX
+        )
+    endif ()
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(
             doggo_warnings
@@ -24,6 +32,14 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
             -Wnon-virtual-dtor
             -Woverloaded-virtual
     )
+
+    if (DOGGO_WARNINGS_AS_ERRORS)
+        target_compile_options(
+                doggo_warnings
+                INTERFACE
+                -Werror
+        )
+    endif ()
 else ()
     message(
             FATAL_ERROR

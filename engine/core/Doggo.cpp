@@ -6,6 +6,7 @@ namespace doggo
     {
         return "DOGGO";
     }
+
     std::string_view getDescription() noexcept
     {
         return "Data-Oriented Geometry & Gameplay Orchestrator";

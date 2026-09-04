@@ -1,0 +1,46 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 28
+  },
+  "configurePresets": [
+    {
+      "name": "doggo-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}"
+    },
+    {
+      "name": "windows-debug",
+      "displayName": "DOGGO Windows Debug",
+      "description": "Native Windows debug build using the host toolchain.",
+      "inherits": "doggo-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "switch-debug",
+      "displayName": "DOGGO Switch Debug",
+      "description": "Nintendo Switch debug build using devkitA64 and libnx.",
+      "inherits": "doggo-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_TOOLCHAIN_FILE": "$env{DEVKITPRO}/cmake/Switch.cmake"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-debug",
+      "displayName": "Build DOGGO Windows Debug",
+      "configurePreset": "windows-debug"
+    },
+    {
+      "name": "switch-debug",
+      "displayName": "Build DOGGO Switch Debug",
+      "configurePreset": "switch-debug"
+    }
+  ]
+}

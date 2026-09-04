@@ -47,6 +47,7 @@ BraceWrapping:
   SplitEmptyNamespace: true
 BreakConstructorInitializers: BeforeComma
 IndentCaseLabels: true
+IndentPPDirectives: BeforeHash
 InsertBraces: true
 InsertNewlineAtEOF: true
 NamespaceIndentation: All

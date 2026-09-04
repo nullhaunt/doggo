@@ -27,5 +27,6 @@ target_link_libraries(
         doggo::warnings
 )
 
-add_subdirectory(time)
 add_subdirectory(logging)
+add_subdirectory(time)
+add_subdirectory(diagnostics)

@@ -1,6 +1,7 @@
 #include "Application.hpp"
 
 #include "Doggo.hpp"
+#include "diagnostics/Assert.hpp"
 #include "logging/Log.hpp"
 #include "time/FrameTimer.hpp"
 
@@ -24,6 +25,11 @@ namespace doggo
             {
                 logging::info( "Application", "Exit requested" );
                 break;
+            }
+
+            if ( state.wasPressed( input::Button::Back ) )
+            {
+                DOGGO_ASSERT( false );
             }
         }
 

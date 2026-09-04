@@ -1,6 +1,7 @@
 #include "DekoBackend.hpp"
 
 #include <cstdio>
+#include <cstring>
 #include <limits>
 
 #include <switch.h>
@@ -9,6 +10,21 @@
 
 namespace doggo::platform::nx::deko
 {
+    namespace
+    {
+        struct Vertex
+        {
+            float mPosition[ 2 ];
+            float mColor[ 3 ];
+        };
+
+        constexpr std::array<Vertex, 3> TriangleVertices{ {
+            { .mPosition = { 0.0f, 0.7f }, .mColor = { 1.0f, 0.2f, 0.2f } },
+            { .mPosition = { -0.7f, -0.7f }, .mColor = { 0.2f, 1.0f, 0.2f } },
+            { .mPosition = { 0.7f, -0.7f }, .mColor = { 0.2f, 0.4f, 1.0f } },
+        } };
+    } // namespace
+
     DekoBackend::~DekoBackend()
     {
         if ( mQueue )
@@ -73,6 +89,32 @@ namespace doggo::platform::nx::deko
             return false;
         }
 
+        mVertexMemory = dk::UniqueMemBlock{ { dk::MemBlockMaker{ mDevice, DK_MEMBLOCK_ALIGNMENT }
+                                                  .setFlags( DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached )
+                                                  .create() } };
+
+        if ( !mVertexMemory )
+        {
+            return false;
+        }
+
+        std::memcpy( mVertexMemory.getCpuAddr(), TriangleVertices.data(), sizeof( TriangleVertices ) );
+
+        DkVtxAttribState positionAttribute = {};
+        positionAttribute.bufferId         = 0;
+        positionAttribute.offset           = offsetof( Vertex, mPosition );
+        positionAttribute.size             = DkVtxAttribSize_2x32;
+        positionAttribute.type             = DkVtxAttribType_Float;
+
+        DkVtxAttribState colorAttribute = {};
+        colorAttribute.bufferId         = 0;
+        colorAttribute.offset           = offsetof( Vertex, mColor );
+        colorAttribute.size             = DkVtxAttribSize_3x32;
+        colorAttribute.type             = DkVtxAttribType_Float;
+
+        const std::array vertexAttributes   = { positionAttribute, colorAttribute };
+        const std::array vertexBufferStates = { DkVtxBufferState{ .stride = sizeof( Vertex ), .divisor = 0 } };
+
         const Result romfsResult = romfsInit();
 
         if ( R_FAILED( romfsResult ) )
@@ -82,6 +124,8 @@ namespace doggo::platform::nx::deko
 
         const bool shadersLoaded = loadShader( mVertexShader, "romfs:/shaders/triangle.vert.dksh" ) &&
                                    loadShader( mFragmentShader, "romfs:/shaders/triangle.frag.dksh" );
+
+        romfsExit();
 
         if ( !shadersLoaded )
         {
@@ -153,6 +197,11 @@ namespace doggo::platform::nx::deko
         mCommandBuffer.bindRasterizerState( rasterizerState );
         mCommandBuffer.bindColorState( colorState );
         mCommandBuffer.bindColorWriteState( colorWriteState );
+
+        mCommandBuffer.bindVtxAttribState( vertexAttributes );
+        mCommandBuffer.bindVtxBufferState( vertexBufferStates );
+
+        mCommandBuffer.bindVtxBuffer( 0, mVertexMemory.getGpuAddr(), sizeof( TriangleVertices ) );
 
         mCommandBuffer.draw( DkPrimitive_Triangles, 3, 1, 0, 0 );
 

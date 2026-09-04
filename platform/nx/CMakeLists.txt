@@ -1,3 +1,5 @@
+add_subdirectory(deko)
+
 add_executable(
         doggo
         Main.cpp
@@ -12,6 +14,8 @@ target_link_libraries(
         PRIVATE
         doggo::platform_application
         doggo::platform_input
+        doggo::render_backend
+        doggo::nx_deko
         doggo::warnings
 )
 

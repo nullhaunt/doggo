@@ -4,16 +4,6 @@
 
 namespace doggo::platform::nx
 {
-    NxApplication::NxApplication() noexcept
-    {
-        consoleInit( nullptr );
-    }
-
-    NxApplication::~NxApplication()
-    {
-        consoleExit( nullptr );
-    }
-
     std::string_view NxApplication::getPlatformName() const noexcept
     {
         return "Nintendo Switch";
@@ -21,12 +11,6 @@ namespace doggo::platform::nx
 
     bool NxApplication::pumpEvents() noexcept
     {
-        if ( !appletMainLoop() )
-        {
-            return false;
-        }
-
-        consoleUpdate( nullptr );
-        return true;
+        return appletMainLoop();
     }
 } // namespace doggo::platform::nx

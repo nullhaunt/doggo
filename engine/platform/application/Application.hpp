@@ -3,6 +3,7 @@
 #include <string_view>
 
 #include "Input.hpp"
+#include "RenderBackend.hpp"
 
 namespace doggo::platform
 {
@@ -25,5 +26,5 @@ namespace doggo::platform
 
 namespace doggo
 {
-    [[nodiscard]] int run( platform::ApplicationHost & host, input::Backend & input );
+    [[nodiscard]] int run( platform::ApplicationHost & host, input::Backend & input, render::Backend & renderer );
 }

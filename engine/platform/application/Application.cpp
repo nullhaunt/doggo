@@ -8,44 +8,34 @@
 
 namespace doggo
 {
+    namespace
+    {
+        constexpr std::size_t BootstrapFrameArenaCapacity = 1024u * 1024u; // 1 MiB
+    }
+
     int run( platform::ApplicationHost & host, input::Backend & input )
     {
         logging::info( "Application", "{}", getDescription() );
         logging::info( "Application", "Platform: {}", host.getPlatformName() );
         logging::info( "Application", "Bootstrap OK" );
 
-        std::array<std::byte, 256> storage = {};
-        memory::LinearAllocator    allocator{ std::span<std::byte>{ storage } };
+        std::unique_ptr<std::byte[]> frameMemory{ new ( std::nothrow ) std::byte[ BootstrapFrameArenaCapacity ] };
+        if ( !frameMemory )
+        {
+            logging::critical(
+                "Memory", "Failed to allocate {} bytes for the frame arena", BootstrapFrameArenaCapacity );
+            return 1;
+        }
 
-        DOGGO_ASSERT( allocator.getCapacity() == storage.size() );
-        DOGGO_ASSERT( allocator.getUsed() == 0 );
-
-        void * first = allocator.allocate( 3, 1 );
-        DOGGO_ASSERT( first );
-
-        void * aligned = allocator.allocate( 16, 16 );
-        DOGGO_ASSERT( aligned );
-        DOGGO_ASSERT( reinterpret_cast<std::uintptr_t>( aligned ) % 16 == 0 );
-
-        const std::size_t usedBeforeFailure = allocator.getUsed();
-
-        void * tooLarge = allocator.allocate( 1024, 16 );
-        DOGGO_ASSERT( !tooLarge );
-
-        DOGGO_ASSERT( allocator.getUsed() == usedBeforeFailure );
-
-        const std::size_t peak = allocator.getPeakUsage();
-
-        allocator.reset();
-        DOGGO_ASSERT( allocator.getUsed() == 0 );
-
-        DOGGO_ASSERT( allocator.getPeakUsage() == peak );
+        memory::LinearAllocator frameArena{ std::span{ frameMemory.get(), BootstrapFrameArenaCapacity } };
+        logging::info( "Memory", "Frame arena capacity: {} KiB", frameArena.getCapacity() / 1024u );
 
         time::FrameTimer frameTimer;
         while ( host.pumpEvents() )
         {
-            input.update();
             frameTimer.tick();
+            frameArena.reset();
+            input.update();
 
             const input::State & state = input.getState();
 
@@ -53,11 +43,6 @@ namespace doggo
             {
                 logging::info( "Application", "Exit requested" );
                 break;
-            }
-
-            if ( state.wasPressed( input::Button::Back ) )
-            {
-                DOGGO_ASSERT( false );
             }
         }
 

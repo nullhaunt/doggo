@@ -19,7 +19,7 @@ namespace doggo::profiling
             mHasFrameStarted = true;
         }
 
-        Buffer & current       = mBuffers.at( mCurrentDepth );
+        Buffer & current       = mBuffers[ mCurrentBuffer ];
         current.mCount         = 0;
         current.mHasOverflowed = false;
         mCurrentDepth          = 0;
@@ -32,7 +32,7 @@ namespace doggo::profiling
             return {};
         }
 
-        const Buffer & completed = mBuffers.at( mCompletedBuffer );
+        const Buffer & completed = mBuffers[ mCompletedBuffer ];
         return { completed.mSamples.data(), completed.mCount };
     }
 
@@ -43,7 +43,7 @@ namespace doggo::profiling
             return false;
         }
 
-        return mBuffers.at( mCompletedBuffer ).mHasOverflowed;
+        return mBuffers[ mCurrentBuffer ].mHasOverflowed;
     }
 
     void CpuProfiler::beginScope( const std::string_view name,
@@ -55,7 +55,7 @@ namespace doggo::profiling
         depth = mCurrentDepth;
         ++mCurrentDepth;
 
-        Buffer & current = mBuffers.at( mCurrentBuffer );
+        Buffer & current = mBuffers[ mCurrentBuffer ];
         if ( current.mCount >= sMaxSamplesPerFrame )
         {
             current.mHasOverflowed = true;
@@ -65,7 +65,7 @@ namespace doggo::profiling
 
         sampleIndex = current.mCount++;
 
-        CpuSample & sample = current.mSamples.at( sampleIndex );
+        CpuSample & sample = current.mSamples[ sampleIndex ];
         sample.mName       = name;
         sample.mDuration   = std::chrono::nanoseconds::zero();
         sample.mDepth      = depth;
@@ -85,10 +85,10 @@ namespace doggo::profiling
             return;
         }
 
-        Buffer & current = mBuffers.at( mCurrentBuffer );
+        Buffer & current = mBuffers[ mCurrentBuffer ];
         DOGGO_ASSERT( sampleIndex < current.mCount );
 
-        current.mSamples.at( sampleIndex ).mDuration = duration;
+        current.mSamples[ sampleIndex ].mDuration = duration;
     }
 
     CpuScope::CpuScope( CpuProfiler & profiler, std::string_view name ) noexcept

@@ -4,8 +4,8 @@ namespace doggo::profiling
 {
     void FrameHistory::push( Duration frameTime ) noexcept
     {
-        mSamples.at( mNextIndex ) = frameTime;
-        mNextIndex                = ( mNextIndex + 1 ) % sCapacity;
+        mSamples[ mNextIndex ] = frameTime;
+        mNextIndex             = ( mNextIndex + 1 ) % sCapacity;
 
         if ( mSampleCount < sCapacity )
         {
@@ -26,7 +26,7 @@ namespace doggo::profiling
         }
 
         const std::size_t latestIndex = ( mNextIndex + sCapacity - 1 ) % sCapacity;
-        return mSamples.at( latestIndex );
+        return mSamples[ latestIndex ];
     }
 
     FrameHistory::Duration FrameHistory::getAverage() const noexcept
@@ -40,7 +40,7 @@ namespace doggo::profiling
 
         for ( std::size_t i = 0; i < mSampleCount; ++i )
         {
-            total += mSamples.at( i );
+            total += mSamples[ i ];
         }
 
         return total / mSampleCount;
@@ -53,11 +53,11 @@ namespace doggo::profiling
             return Duration::zero();
         }
 
-        Duration minimum = mSamples.at( 0 );
+        Duration minimum = mSamples[ 0 ];
 
         for ( std::size_t i = 1; i < mSampleCount; ++i )
         {
-            minimum = std::min( minimum, mSamples.at( i ) );
+            minimum = std::min( minimum, mSamples[ i ] );
         }
 
         return minimum;
@@ -70,11 +70,11 @@ namespace doggo::profiling
             return Duration::zero();
         }
 
-        Duration maximum = mSamples.at( 0 );
+        Duration maximum = mSamples[ 0 ];
 
         for ( std::size_t i = 1; i < mSampleCount; ++i )
         {
-            maximum = std::max( maximum, mSamples.at( i ) );
+            maximum = std::max( maximum, mSamples[ i ] );
         }
 
         return maximum;

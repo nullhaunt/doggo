@@ -30,3 +30,4 @@ target_link_libraries(
 add_subdirectory(logging)
 add_subdirectory(time)
 add_subdirectory(diagnostics)
+add_subdirectory(memory)

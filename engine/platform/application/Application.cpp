@@ -4,6 +4,7 @@
 #include <iostream>
 
 #include "Doggo.hpp"
+#include "time/FrameTimer.hpp"
 
 namespace doggo
 {
@@ -15,8 +16,10 @@ namespace doggo
                                   "DOGGO bootstrap OK.",
                                   getName(), getDescription(), host.getPlatformName() );
 
+        time::FrameTimer frameTimer;
         while ( host.pumpEvents() )
         {
+            frameTimer.tick();
         }
 
         return 0;

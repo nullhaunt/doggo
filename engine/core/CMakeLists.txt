@@ -26,3 +26,5 @@ target_link_libraries(
         PRIVATE
         doggo::warnings
 )
+
+add_subdirectory(time)

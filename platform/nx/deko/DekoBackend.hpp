@@ -4,6 +4,7 @@
 
 #include <deko3d.hpp>
 
+#include "DekoMemoryArena.hpp"
 #include "RenderBackend.hpp"
 
 namespace doggo::platform::nx::deko
@@ -18,20 +19,26 @@ namespace doggo::platform::nx::deko
         void               renderFrame() noexcept override;
 
       private:
-        static constexpr std::size_t   sFramebufferCount     = 2;
-        static constexpr std::uint32_t sFramebufferWidth     = 1280;
-        static constexpr std::uint32_t sFramebufferHeight    = 720;
-        static constexpr std::uint32_t sCommandMemorySize    = 16 * 1024;
+        static constexpr std::size_t   sFramebufferCount  = 2;
+        static constexpr std::uint32_t sFramebufferWidth  = 1280;
+        static constexpr std::uint32_t sFramebufferHeight = 720;
+
+        static constexpr std::uint32_t sCommandMemorySize = 16 * 1024;
+        static_assert( sCommandMemorySize % DK_CMDMEM_ALIGNMENT == 0 );
+
         static constexpr std::uint32_t sShaderCodeMemorySize = 64 * 1024;
+        static constexpr std::uint32_t sDataMemorySize       = 1024 * 1024;
 
         dk::UniqueDevice mDevice;
+
+        DekoMemoryArena mDataMemory;
 
         dk::UniqueMemBlock                       mFramebufferMemory;
         std::array<dk::Image, sFramebufferCount> mFramebuffers = {};
         dk::UniqueSwapchain                      mSwapChain;
 
-        dk::UniqueMemBlock mCommandMemory;
-        dk::UniqueCmdBuf   mCommandBuffer;
+        dk::UniqueCmdBuf mCommandBuffer;
+        DekoMemorySlice  mCommandMemory;
 
         std::array<DkCmdList, sFramebufferCount> mBindFramebufferCommands = {};
         DkCmdList                                mRenderCommands          = {};
@@ -39,8 +46,8 @@ namespace doggo::platform::nx::deko
         dk::UniqueMemBlock mShaderCodeMemory;
         std::uint32_t      mShaderCodeOffset = 0;
 
-        dk::UniqueMemBlock mVertexMemory;
-        dk::Shader         mVertexShader;
+        dk::Shader      mVertexShader;
+        DekoMemorySlice mVertexMemory;
 
         dk::Shader mFragmentShader;
 

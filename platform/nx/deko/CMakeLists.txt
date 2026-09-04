@@ -30,6 +30,8 @@ add_library(
         STATIC
         DekoBackend.cpp
         DekoBackend.hpp
+        DekoMemoryArena.cpp
+        DekoMemoryArena.hpp
 )
 
 add_library(doggo::nx_deko ALIAS doggo_nx_deko)

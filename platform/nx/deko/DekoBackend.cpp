@@ -46,6 +46,12 @@ namespace doggo::platform::nx::deko
             return false;
         }
 
+        if ( !mDataMemory.initialize(
+                 mDevice, sDataMemorySize, DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached ) )
+        {
+            return false;
+        }
+
         dk::ImageLayout framebufferLayout;
 
         dk::ImageLayoutMaker{ mDevice }
@@ -89,17 +95,6 @@ namespace doggo::platform::nx::deko
             return false;
         }
 
-        mVertexMemory = dk::UniqueMemBlock{ { dk::MemBlockMaker{ mDevice, DK_MEMBLOCK_ALIGNMENT }
-                                                  .setFlags( DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached )
-                                                  .create() } };
-
-        if ( !mVertexMemory )
-        {
-            return false;
-        }
-
-        std::memcpy( mVertexMemory.getCpuAddr(), TriangleVertices.data(), sizeof( TriangleVertices ) );
-
         DkVtxAttribState positionAttribute = {};
         positionAttribute.bufferId         = 0;
         positionAttribute.offset           = offsetof( Vertex, mPosition );
@@ -112,8 +107,8 @@ namespace doggo::platform::nx::deko
         colorAttribute.size             = DkVtxAttribSize_3x32;
         colorAttribute.type             = DkVtxAttribType_Float;
 
-        const std::array vertexAttributes   = { positionAttribute, colorAttribute };
-        const std::array vertexBufferStates = { DkVtxBufferState{ .stride = sizeof( Vertex ), .divisor = 0 } };
+        const std::array     vertexAttributes   = { positionAttribute, colorAttribute };
+        constexpr std::array vertexBufferStates = { DkVtxBufferState{ .stride = sizeof( Vertex ), .divisor = 0 } };
 
         const Result romfsResult = romfsInit();
 
@@ -131,6 +126,17 @@ namespace doggo::platform::nx::deko
         {
             return false;
         }
+
+        constexpr std::uint32_t VertexBufferAlignment = 16;
+        const auto vertexMemory = mDataMemory.allocate( sizeof( TriangleVertices ), VertexBufferAlignment );
+
+        if ( !vertexMemory )
+        {
+            return false;
+        }
+
+        mVertexMemory = *vertexMemory;
+        std::memcpy( mDataMemory.getCpuAddress( mVertexMemory ), TriangleVertices.data(), sizeof( TriangleVertices ) );
 
         std::array<DkImage const *, sFramebufferCount> swapChainImages = {};
 
@@ -150,15 +156,6 @@ namespace doggo::platform::nx::deko
             return false;
         }
 
-        mCommandMemory = dk::UniqueMemBlock{ dk::MemBlockMaker{ mDevice, sCommandMemorySize }
-                                                 .setFlags( DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached )
-                                                 .create() };
-
-        if ( !mCommandMemory )
-        {
-            return false;
-        }
-
         mCommandBuffer = dk::UniqueCmdBuf{ dk::CmdBufMaker{ mDevice }.create() };
 
         if ( !mCommandBuffer )
@@ -166,7 +163,16 @@ namespace doggo::platform::nx::deko
             return false;
         }
 
-        mCommandBuffer.addMemory( mCommandMemory, 0, sCommandMemorySize );
+        const auto commandMemory = mDataMemory.allocate( sCommandMemorySize, DK_CMDMEM_ALIGNMENT );
+
+        if ( !commandMemory )
+        {
+            return false;
+        }
+
+        mCommandMemory = *commandMemory;
+
+        mCommandBuffer.addMemory( mDataMemory.getMemoryBlock(), mCommandMemory.mOffset, mCommandMemory.mSize );
 
         for ( std::size_t i = 0; i < sFramebufferCount; ++i )
         {
@@ -177,10 +183,14 @@ namespace doggo::platform::nx::deko
             mBindFramebufferCommands[ i ] = mCommandBuffer.finishList();
         }
 
-        const DkViewport viewport{
-            0.0f, 0.0f, static_cast<float>( sFramebufferWidth ), static_cast<float>( sFramebufferHeight ), 0.0f, 1.0f };
+        constexpr DkViewport viewport{ .x      = 0.0f,
+                                       .y      = 0.0f,
+                                       .width  = static_cast<float>( sFramebufferWidth ),
+                                       .height = static_cast<float>( sFramebufferHeight ),
+                                       .near   = 0.0f,
+                                       .far    = 1.0f };
 
-        const DkScissor scissor{ 0, 0, sFramebufferWidth, sFramebufferHeight };
+        constexpr DkScissor scissor{ .x = 0, .y = 0, .width = sFramebufferWidth, .height = sFramebufferHeight };
 
         mCommandBuffer.setViewports( 0, viewport );
         mCommandBuffer.setScissors( 0, scissor );
@@ -201,7 +211,7 @@ namespace doggo::platform::nx::deko
         mCommandBuffer.bindVtxAttribState( vertexAttributes );
         mCommandBuffer.bindVtxBufferState( vertexBufferStates );
 
-        mCommandBuffer.bindVtxBuffer( 0, mVertexMemory.getGpuAddr(), sizeof( TriangleVertices ) );
+        mCommandBuffer.bindVtxBuffer( 0, mDataMemory.getGpuAddress( mVertexMemory ), mVertexMemory.mSize );
 
         mCommandBuffer.draw( DkPrimitive_Triangles, 3, 1, 0, 0 );
 

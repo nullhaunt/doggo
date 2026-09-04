@@ -15,74 +15,84 @@ namespace doggo::platform::nx
         {
             std::uint64_t result = 0;
 
-            switch ( buttons )
+            if ( buttons & HidNpadButton_B )
             {
-                case HidNpadButton_B:
-                    result |= doggoMask( input::Button::South );
-                    break;
+                result |= doggoMask( input::Button::South );
+            }
 
-                case HidNpadButton_A:
-                    result |= doggoMask( input::Button::East );
-                    break;
+            if ( buttons & HidNpadButton_A )
+            {
+                result |= doggoMask( input::Button::East );
+            }
 
-                case HidNpadButton_Y:
-                    result |= doggoMask( input::Button::West );
-                    break;
+            if ( buttons & HidNpadButton_Y )
+            {
+                result |= doggoMask( input::Button::West );
+            }
 
-                case HidNpadButton_X:
-                    result |= doggoMask( input::Button::North );
-                    break;
+            if ( buttons & HidNpadButton_X )
+            {
+                result |= doggoMask( input::Button::North );
+            }
 
-                case HidNpadButton_StickL:
-                    result |= doggoMask( input::Button::LeftStick );
-                    break;
+            if ( buttons & HidNpadButton_StickL )
+            {
+                result |= doggoMask( input::Button::LeftStick );
+            }
 
-                case HidNpadButton_StickR:
-                    result |= doggoMask( input::Button::RightStick );
-                    break;
+            if ( buttons & HidNpadButton_StickR )
+            {
+                result |= doggoMask( input::Button::RightStick );
+            }
 
-                case HidNpadButton_L:
-                    result |= doggoMask( input::Button::LeftShoulder );
-                    break;
+            if ( buttons & HidNpadButton_L )
+            {
+                result |= doggoMask( input::Button::LeftShoulder );
+            }
 
-                case HidNpadButton_R:
-                    result |= doggoMask( input::Button::RightShoulder );
-                    break;
+            if ( buttons & HidNpadButton_R )
+            {
+                result |= doggoMask( input::Button::RightShoulder );
+            }
 
-                case HidNpadButton_ZL:
-                    result |= doggoMask( input::Button::LeftTrigger );
-                    break;
+            if ( buttons & HidNpadButton_ZL )
+            {
+                result |= doggoMask( input::Button::LeftTrigger );
+            }
 
-                case HidNpadButton_ZR:
-                    result |= doggoMask( input::Button::RightTrigger );
-                    break;
+            if ( buttons & HidNpadButton_ZR )
+            {
+                result |= doggoMask( input::Button::RightTrigger );
+            }
 
-                case HidNpadButton_Plus:
-                    result |= doggoMask( input::Button::Start );
-                    break;
+            if ( buttons & HidNpadButton_Plus )
+            {
+                result |= doggoMask( input::Button::Start );
+            }
 
-                case HidNpadButton_Minus:
-                    result |= doggoMask( input::Button::Back );
-                    break;
+            if ( buttons & HidNpadButton_Minus )
+            {
+                result |= doggoMask( input::Button::Back );
+            }
 
-                case HidNpadButton_Left:
-                    result |= doggoMask( input::Button::DPadLeft );
-                    break;
+            if ( buttons & HidNpadButton_Left )
+            {
+                result |= doggoMask( input::Button::DPadLeft );
+            }
 
-                case HidNpadButton_Up:
-                    result |= doggoMask( input::Button::DPadUp );
-                    break;
+            if ( buttons & HidNpadButton_Up )
+            {
+                result |= doggoMask( input::Button::DPadUp );
+            }
 
-                case HidNpadButton_Right:
-                    result |= doggoMask( input::Button::DPadRight );
-                    break;
+            if ( buttons & HidNpadButton_Right )
+            {
+                result |= doggoMask( input::Button::DPadRight );
+            }
 
-                case HidNpadButton_Down:
-                    result |= doggoMask( input::Button::DPadDown );
-                    break;
-
-                default:
-                    result = 0;
+            if ( buttons & HidNpadButton_Down )
+            {
+                result |= doggoMask( input::Button::DPadDown );
             }
 
             return result;

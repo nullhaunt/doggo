@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.28)
 
 project(
         DOGGO
-        VERSION 0.4.0
+        VERSION 0.1.0
         DESCRIPTION "Data-Oriented Geometry & Gameplay Orchestrator"
         LANGUAGES CXX
 )

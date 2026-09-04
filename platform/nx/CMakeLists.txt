@@ -1,12 +1,14 @@
 add_executable(
         doggo
         Main.cpp
+        NxApplication.cpp
+        NxApplication.hpp
 )
 
 target_link_libraries(
         doggo
         PRIVATE
-        doggo::core
+        doggo::platform_application
         doggo::warnings
 )
 

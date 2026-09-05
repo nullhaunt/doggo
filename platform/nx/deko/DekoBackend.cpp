@@ -325,6 +325,15 @@ namespace doggo::platform::nx::deko
         const std::size_t drawCount = std::min( draws.size(), sBootstrapDrawCapacity );
 
         const auto frameSlot = static_cast<std::size_t>( slot );
+
+        const DkResult fenceResult = mFrameFences[ frameSlot ].wait();
+        DOGGO_ASSERT( fenceResult == DkResult_Success );
+
+        if ( fenceResult != DkResult_Success )
+        {
+            return;
+        }
+
         auto * transformBase = static_cast<std::byte *>( mDataMemory.getCpuAddress( mTransformMemory[ frameSlot ] ) );
 
         for ( std::size_t drawIndex = 0; drawIndex < drawCount; ++drawIndex )
@@ -353,6 +362,7 @@ namespace doggo::platform::nx::deko
             mQueue.submitCommands( mMeshDrawCommands[ mesh.mIndex ] );
         }
 
+        mQueue.signalFence( mFrameFences[ frameSlot ], false );
         mQueue.presentImage( mSwapChain, slot );
     }
 

@@ -2,6 +2,7 @@
 
 #include <array>
 #include <chrono>
+#include <cstdint>
 #include <span>
 
 namespace doggo::render
@@ -48,14 +49,16 @@ namespace doggo::render
 
     struct DrawRequest
     {
-        MeshId   mMeshId = 0;
-        DrawData mDrawData;
+        MeshId       mMeshId        = 0;
+        std::uint8_t _padding[ 12 ] = {};
+        DrawData     mDrawData;
     };
 
     struct DrawPacket
     {
-        MeshHandle mMesh;
-        DrawData   mDrawData;
+        MeshHandle   mMesh;
+        std::uint8_t _padding[ 12 ] = {};
+        DrawData     mDrawData;
     };
 
     class Backend
@@ -82,5 +85,6 @@ namespace doggo::render
       public:
         [[nodiscard]] bool initialize() noexcept override;
         void renderFrame( const FrameInfo & frameInfo, std::span<const DrawPacket> draws ) noexcept override;
+        [[nodiscard]] MeshHandle createMesh( const MeshData & meshData ) noexcept override;
     };
 } // namespace doggo::render

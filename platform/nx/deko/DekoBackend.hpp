@@ -56,6 +56,8 @@ namespace doggo::platform::nx::deko
         std::array<dk::Image, sFramebufferCount> mFramebuffers = {};
         dk::UniqueSwapchain                      mSwapChain;
 
+        std::array<dk::Fence, sFramebufferCount> mFrameFences = {};
+
         dk::UniqueCmdBuf mCommandBuffer;
         DekoMemorySlice  mCommandMemory;
 
@@ -74,8 +76,6 @@ namespace doggo::platform::nx::deko
         std::size_t                             mMeshCount        = 0;
 
         std::array<DekoMemorySlice, sFramebufferCount> mTransformMemory = {};
-
-        std::uint32_t mIndexCount = 0;
 
         [[nodiscard]] bool loadShader( dk::Shader & shader, const char * path ) noexcept;
 

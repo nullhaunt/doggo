@@ -10,4 +10,9 @@ namespace doggo::render
     void NullBackend::renderFrame( const FrameInfo & /*frameInfo*/, std::span<const DrawPacket> /*draws*/ ) noexcept
     {
     }
+
+    MeshHandle NullBackend::createMesh( const MeshData & /*meshData*/ ) noexcept
+    {
+        return {};
+    }
 } // namespace doggo::render

@@ -107,7 +107,7 @@ namespace doggo::sample::mesh
             return result;
         }
 
-        constexpr std::array<render::MeshVertex, 8> CubeVertices{ {
+        constexpr std::array<render::MeshVertex, 8> CubeVertices = { {
             { .mPosition = { -1.0F, -1.0F, -1.0F }, .mColor = { 1.0F, 0.2F, 0.2F } },
             { .mPosition = { 1.0F, -1.0F, -1.0F }, .mColor = { 0.2F, 1.0F, 0.2F } },
             { .mPosition = { 1.0F, 1.0F, -1.0F }, .mColor = { 0.2F, 0.4F, 1.0F } },
@@ -119,7 +119,7 @@ namespace doggo::sample::mesh
             { .mPosition = { -1.0F, 1.0F, 1.0F }, .mColor = { 1.0F, 0.5F, 0.2F } },
         } };
 
-        constexpr std::array<std::uint16_t, 36> CubeIndices{ {
+        constexpr std::array<std::uint16_t, 36> CubeIndices = { {
             // clang-format off
             // Front
             4, 5, 6,
@@ -153,19 +153,37 @@ namespace doggo::sample::mesh
     {
     }
 
-    render::DrawData MeshSample::buildDrawData( const render::FrameInfo & frameInfo ) const noexcept
+    std::span<const render::DrawData> MeshSample::buildDrawData( const render::FrameInfo & frameInfo ) noexcept
     {
-        constexpr float DegreesToRadians = std::numbers::pi_v<float> / 180.0f;
+        constexpr float      DegreesToRadians = std::numbers::pi_v<float> / 180.0f;
+        constexpr std::array Positions        = { -2.5f, 0.0f, 2.5f };
 
         static const Mat4 viewProjection =
             multiply( makePerspectiveRhZo( 60.0f * DegreesToRadians, 1280.0f / 720.0f, 0.1f, 100.0f ),
                       makeTranslation( 0.0f, 0.0f, -4.0f ) );
 
         const float seconds = std::chrono::duration<float>{ frameInfo.mElapsedTime }.count();
-        const Mat4  model   = multiply( makeRotationY( seconds * 0.8f ), makeRotationX( -20.0f * DegreesToRadians ) );
-        const Mat4  mvp     = multiply( viewProjection, model );
 
-        return render::DrawData{ .mModelViewProjection = mvp.m };
+        std::size_t drawIndex = 0;
+
+        for ( const float y : Positions )
+        {
+            for ( const float x : Positions )
+            {
+                const float phase = static_cast<float>( drawIndex ) * 0.35f;
+
+                const Mat4 rotation =
+                    multiply( makeRotationY( seconds * 0.8f + phase ), makeRotationX( -20.0f * DegreesToRadians ) );
+
+                const Mat4 model = multiply( makeTranslation( x, y, 0.0f ), rotation );
+                const Mat4 mvp   = multiply( viewProjection, model );
+
+                mDraws[ drawIndex ].mModelViewProjection = mvp.m;
+                ++drawIndex;
+            }
+        }
+
+        return mDraws;
     }
 
     const render::MeshData & MeshSample::getMeshData() const noexcept

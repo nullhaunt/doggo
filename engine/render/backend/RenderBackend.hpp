@@ -44,14 +44,14 @@ namespace doggo::render
         Backend( Backend && )             = delete;
         Backend & operator=( Backend && ) = delete;
 
-        [[nodiscard]] virtual bool initialize( const MeshData & meshData ) noexcept                               = 0;
-        virtual void               renderFrame( const FrameInfo & frameInfo, const DrawData & drawData ) noexcept = 0;
+        [[nodiscard]] virtual bool initialize( const MeshData & meshData ) noexcept                       = 0;
+        virtual void renderFrame( const FrameInfo & frameInfo, std::span<const DrawData> draws ) noexcept = 0;
     };
 
     class NullBackend : public Backend
     {
       public:
         [[nodiscard]] bool initialize( const MeshData & meshData ) noexcept override;
-        void               renderFrame( const FrameInfo & frameInfo, const DrawData & drawData ) noexcept override;
+        void renderFrame( const FrameInfo & frameInfo, std::span<const DrawData> draws ) noexcept override;
     };
 } // namespace doggo::render

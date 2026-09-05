@@ -161,9 +161,11 @@ namespace doggo::platform::nx::deko
 
         mIndexCount = static_cast<std::uint32_t>( meshData.mIndices.size() );
 
+        constexpr std::uint32_t TransformMemoryPerFrame = sTransformStride * sBootstrapDrawCapacity;
+
         for ( std::size_t i = 0; i < sFramebufferCount; ++i )
         {
-            const auto transformMemory = mDataMemory.allocate( sizeof( render::DrawData ), DK_UNIFORM_BUF_ALIGNMENT );
+            const auto transformMemory = mDataMemory.allocate( TransformMemoryPerFrame, DK_UNIFORM_BUF_ALIGNMENT );
 
             if ( !transformMemory )
             {
@@ -215,14 +217,10 @@ namespace doggo::platform::nx::deko
 
         for ( std::size_t i = 0; i < sFramebufferCount; ++i )
         {
-            dk::ImageView                      colorTarget{ mFramebuffers[ i ] };
-            std::array<DkImageView const *, 1> colorTargets{ &colorTarget };
+            dk::ImageView                      colorTarget  = { mFramebuffers[ i ] };
+            std::array<DkImageView const *, 1> colorTargets = { &colorTarget };
 
             mCommandBuffer.bindRenderTargets( colorTargets, &depthTarget );
-
-            mCommandBuffer.bindUniformBuffer(
-                DkStage_Vertex, 0, mDataMemory.getGpuAddress( mTransformMemory[ i ] ), mTransformMemory[ i ].mSize );
-
             mBindFramebufferCommands[ i ] = mCommandBuffer.finishList();
         }
 
@@ -241,7 +239,7 @@ namespace doggo::platform::nx::deko
         mCommandBuffer.clearColor( 0, DkColorMask_RGBA, 0.08f, 0.12f, 0.18f, 1.0f );
         mCommandBuffer.clearDepthStencil( true, 1.0f, 0xFF, 0 );
 
-        const std::array<DkShader const *, 2> shaders{ &mVertexShader, &mFragmentShader };
+        const std::array<DkShader const *, 2> shaders = { &mVertexShader, &mFragmentShader };
 
         dk::RasterizerState   rasterizerState;
         dk::ColorState        colorState;
@@ -263,9 +261,22 @@ namespace doggo::platform::nx::deko
         mCommandBuffer.bindVtxBuffer( 0, mDataMemory.getGpuAddress( mVertexMemory ), mVertexMemory.mSize );
         mCommandBuffer.bindIdxBuffer( DkIdxFormat_Uint16, mDataMemory.getGpuAddress( mIndexMemory ) );
 
-        mCommandBuffer.drawIndexed( DkPrimitive_Triangles, mIndexCount, 1, 0, 0, 0 );
+        mRenderStateCommands = mCommandBuffer.finishList();
 
-        mRenderCommands = mCommandBuffer.finishList();
+        for ( std::size_t frameSlot = 0; frameSlot < sFramebufferCount; ++frameSlot )
+        {
+            const DkGpuAddr transformBase = mDataMemory.getGpuAddress( mTransformMemory[ frameSlot ] );
+
+            for ( std::size_t drawSlot = 0; drawSlot < sBootstrapDrawCapacity; ++drawSlot )
+            {
+                const DkGpuAddr transformAddress = transformBase + drawSlot * sTransformStride;
+
+                mCommandBuffer.bindUniformBuffer( DkStage_Vertex, 0, transformAddress, sizeof( render::DrawData ) );
+                mCommandBuffer.drawIndexed( DkPrimitive_Triangles, mIndexCount, 1, 0, 0, 0 );
+
+                mDrawCommands[ frameSlot ][ drawSlot ] = mCommandBuffer.finishList();
+            }
+        }
 
         mQueue = dk::UniqueQueue{ dk::QueueMaker{ mDevice }.setFlags( DkQueueFlags_Graphics ).create() };
 
@@ -278,7 +289,8 @@ namespace doggo::platform::nx::deko
         return true;
     }
 
-    void DekoBackend::renderFrame( const render::FrameInfo & /*frameInfo*/, const render::DrawData & drawData ) noexcept
+    void DekoBackend::renderFrame( const render::FrameInfo & /*frameInfo*/,
+                                   std::span<const render::DrawData> draws ) noexcept
     {
         DOGGO_ASSERT( mIsInitialized );
 
@@ -296,11 +308,27 @@ namespace doggo::platform::nx::deko
             return;
         }
 
+        DOGGO_ASSERT( draws.size() <= sBootstrapDrawCapacity );
+
+        const std::size_t drawCount = std::min( draws.size(), sBootstrapDrawCapacity );
+
         const auto frameSlot = static_cast<std::size_t>( slot );
-        std::memcpy( mDataMemory.getCpuAddress( mTransformMemory[ frameSlot ] ), &drawData, sizeof( drawData ) );
+        auto * transformBase = static_cast<std::byte *>( mDataMemory.getCpuAddress( mTransformMemory[ frameSlot ] ) );
+
+        for ( std::size_t drawIndex = 0; drawIndex < drawCount; ++drawIndex )
+        {
+            std::memcpy(
+                transformBase + drawIndex * sTransformStride, &draws[ drawIndex ], sizeof( render::DrawData ) );
+        }
 
         mQueue.submitCommands( mBindFramebufferCommands[ frameSlot ] );
-        mQueue.submitCommands( mRenderCommands );
+        mQueue.submitCommands( mRenderStateCommands );
+
+        for ( std::size_t drawIndex = 0; drawIndex < drawCount; ++drawIndex )
+        {
+            mQueue.submitCommands( mDrawCommands[ frameSlot ][ drawIndex ] );
+        }
+
         mQueue.presentImage( mSwapChain, slot );
     }
 

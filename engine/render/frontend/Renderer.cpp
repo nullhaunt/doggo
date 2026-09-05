@@ -15,7 +15,7 @@ namespace doggo::render
 
     void Renderer::renderFrame( const FrameInfo & frameInfo ) noexcept
     {
-        const DrawData drawData = mSource.buildDrawData( frameInfo );
-        mBackend.renderFrame( frameInfo, drawData );
+        const std::span<const DrawData> draws = mSource.buildDrawData( frameInfo );
+        mBackend.renderFrame( frameInfo, draws );
     }
 } // namespace doggo::render

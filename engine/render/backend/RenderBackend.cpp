@@ -7,7 +7,7 @@ namespace doggo::render
         return true;
     }
 
-    void NullBackend::renderFrame( const FrameInfo & /*frameInfo*/, const DrawData & /*drawData*/ ) noexcept
+    void NullBackend::renderFrame( const FrameInfo & /*frameInfo*/, std::span<const DrawData> /*draws*/ ) noexcept
     {
     }
 } // namespace doggo::render

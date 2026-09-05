@@ -16,18 +16,23 @@ namespace doggo::platform::nx::deko
         ~DekoBackend() override;
 
         [[nodiscard]] bool initialize( const render::MeshData & meshData ) noexcept override;
-        void renderFrame( const render::FrameInfo & frameInfo, const render::DrawData & drawData ) noexcept override;
+        void               renderFrame( const render::FrameInfo &         frameInfo,
+                                        std::span<const render::DrawData> draws ) noexcept override;
 
       private:
         static constexpr std::size_t   sFramebufferCount  = 2;
         static constexpr std::uint32_t sFramebufferWidth  = 1280;
         static constexpr std::uint32_t sFramebufferHeight = 720;
 
-        static constexpr std::uint32_t sCommandMemorySize = 16 * 1024;
+        static constexpr std::uint32_t sCommandMemorySize = 64 * 1024;
         static_assert( sCommandMemorySize % DK_CMDMEM_ALIGNMENT == 0 );
 
         static constexpr std::uint32_t sShaderCodeMemorySize = 64 * 1024;
         static constexpr std::uint32_t sDataMemorySize       = 1024 * 1024;
+
+        static constexpr std::size_t   sBootstrapDrawCapacity = 16;
+        static constexpr std::uint32_t sTransformStride       = DK_UNIFORM_BUF_ALIGNMENT;
+        static_assert( sizeof( render::DrawData ) <= sTransformStride );
 
         dk::UniqueDevice mDevice;
 
@@ -42,8 +47,9 @@ namespace doggo::platform::nx::deko
         dk::UniqueCmdBuf mCommandBuffer;
         DekoMemorySlice  mCommandMemory;
 
-        std::array<DkCmdList, sFramebufferCount> mBindFramebufferCommands = {};
-        DkCmdList                                mRenderCommands          = {};
+        std::array<DkCmdList, sFramebufferCount>                                     mBindFramebufferCommands = {};
+        DkCmdList                                                                    mRenderStateCommands     = {};
+        std::array<std::array<DkCmdList, sBootstrapDrawCapacity>, sFramebufferCount> mDrawCommands            = {};
 
         dk::UniqueMemBlock mShaderCodeMemory;
         std::uint32_t      mShaderCodeOffset = 0;

@@ -163,7 +163,7 @@ namespace doggo::platform::nx::deko
 
         for ( std::size_t i = 0; i < sFramebufferCount; ++i )
         {
-            const auto transformMemory = mDataMemory.allocate( mIndexCount, DK_UNIFORM_BUF_ALIGNMENT );
+            const auto transformMemory = mDataMemory.allocate( sizeof( render::DrawData ), DK_UNIFORM_BUF_ALIGNMENT );
 
             if ( !transformMemory )
             {

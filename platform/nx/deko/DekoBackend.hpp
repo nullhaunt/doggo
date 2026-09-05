@@ -15,8 +15,8 @@ namespace doggo::platform::nx::deko
         DekoBackend() = default;
         ~DekoBackend() override;
 
-        [[nodiscard]] bool initialize() noexcept override;
-        void               renderFrame( const render::FrameInfo & frameInfo ) noexcept override;
+        [[nodiscard]] bool initialize( const render::MeshData & meshData ) noexcept override;
+        void renderFrame( const render::FrameInfo & frameInfo, const render::DrawData & drawData ) noexcept override;
 
       private:
         static constexpr std::size_t   sFramebufferCount  = 2;
@@ -54,6 +54,8 @@ namespace doggo::platform::nx::deko
         DekoMemorySlice                                mVertexMemory;
         DekoMemorySlice                                mIndexMemory;
         std::array<DekoMemorySlice, sFramebufferCount> mTransformMemory = {};
+
+        std::uint32_t mIndexCount = 0;
 
         [[nodiscard]] bool loadShader( dk::Shader & shader, const char * path ) noexcept;
 

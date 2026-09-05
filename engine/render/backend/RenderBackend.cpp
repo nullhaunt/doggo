@@ -2,12 +2,12 @@
 
 namespace doggo::render
 {
-    bool NullBackend::initialize() noexcept
+    bool NullBackend::initialize( const MeshData & /*meshData*/ ) noexcept
     {
         return true;
     }
 
-    void NullBackend::renderFrame( const FrameInfo & /*frameInfo*/ ) noexcept
+    void NullBackend::renderFrame( const FrameInfo & /*frameInfo*/, const DrawData & /*drawData*/ ) noexcept
     {
     }
 } // namespace doggo::render

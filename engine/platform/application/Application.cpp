@@ -14,7 +14,7 @@ namespace doggo
         constexpr std::size_t BootstrapFrameArenaCapacity = 1024u * 1024u; // 1 MiB
     } // namespace
 
-    int run( platform::ApplicationHost & host, input::Backend & input, render::Backend & renderer )
+    int run( platform::ApplicationHost & host, input::Backend & input, render::Renderer & renderer )
     {
         logging::info( "Application", "{}", getDescription() );
         logging::info( "Application", "Platform: {}", host.getPlatformName() );

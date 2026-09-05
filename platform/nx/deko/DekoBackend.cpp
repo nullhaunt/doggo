@@ -1,9 +1,7 @@
 #include "DekoBackend.hpp"
 
-#include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <limits>
 
 #include <switch.h>
 
@@ -11,174 +9,6 @@
 
 namespace doggo::platform::nx::deko
 {
-    namespace
-    {
-        struct Vertex
-        {
-            float mPosition[ 3 ];
-            float mColor[ 3 ];
-        };
-
-        struct Mat4
-        {
-            std::array<float, 16> m = {};
-        };
-
-        struct alignas( 16 ) TransformUniform
-        {
-            Mat4 mMvp;
-        };
-
-        static_assert( sizeof( TransformUniform ) == 64 );
-
-        [[nodiscard]] Mat4 makeIdentity() noexcept
-        {
-            Mat4 result = {};
-
-            result.m[ 0 ]  = 1.0f;
-            result.m[ 5 ]  = 1.0f;
-            result.m[ 10 ] = 1.0f;
-            result.m[ 15 ] = 1.0f;
-
-            return result;
-        }
-
-        [[nodiscard]] Mat4 multiply( const Mat4 & a, const Mat4 & b ) noexcept
-        {
-            Mat4 result = {};
-
-            for ( std::size_t column = 0; column < 4; ++column )
-            {
-                for ( std::size_t row = 0; row < 4; ++row )
-                {
-                    result.m[ column * 4 + row ] =
-                        a.m[ 0 * 4 + row ] * b.m[ column * 4 + 0 ] + a.m[ 1 * 4 + row ] * b.m[ column * 4 + 1 ] +
-                        a.m[ 2 * 4 + row ] * b.m[ column * 4 + 2 ] + a.m[ 3 * 4 + row ] * b.m[ column * 4 + 3 ];
-                }
-            }
-
-            return result;
-        }
-
-        [[nodiscard]] Mat4 makeTranslation( float x, float y, float z ) noexcept
-        {
-            Mat4 result = makeIdentity();
-
-            result.m[ 12 ] = x;
-            result.m[ 13 ] = y;
-            result.m[ 14 ] = z;
-
-            return result;
-        }
-
-        [[nodiscard]] Mat4 makeRotationX( float radians ) noexcept
-        {
-            Mat4 result = makeIdentity();
-
-            const float cosine = std::cos( radians );
-            const float sine   = std::sin( radians );
-
-            result.m[ 5 ]  = cosine;
-            result.m[ 6 ]  = sine;
-            result.m[ 9 ]  = -sine;
-            result.m[ 10 ] = cosine;
-
-            return result;
-        }
-
-        [[nodiscard]] Mat4 makeRotationY( float radians ) noexcept
-        {
-            Mat4 result = makeIdentity();
-
-            const float cosine = std::cos( radians );
-            const float sine   = std::sin( radians );
-
-            result.m[ 0 ]  = cosine;
-            result.m[ 2 ]  = -sine;
-            result.m[ 8 ]  = sine;
-            result.m[ 10 ] = cosine;
-
-            return result;
-        }
-
-        [[nodiscard]] Mat4 makePerspectiveRhZo( float verticalFovRadians,
-                                                float aspectRatio,
-                                                float nearPlane,
-                                                float farPlane ) noexcept
-        {
-            DOGGO_ASSERT( verticalFovRadians > 0.0f );
-            DOGGO_ASSERT( aspectRatio > 0.0f );
-            DOGGO_ASSERT( nearPlane > 0.0f );
-            DOGGO_ASSERT( farPlane > nearPlane );
-
-            const float focalLength = 1.0f / std::tan( verticalFovRadians * 0.5f );
-
-            Mat4 result = {};
-
-            result.m[ 0 ]  = focalLength / aspectRatio;
-            result.m[ 5 ]  = focalLength;
-            result.m[ 10 ] = farPlane / ( nearPlane - farPlane );
-            result.m[ 11 ] = -1.0f;
-            result.m[ 14 ] = ( farPlane * nearPlane ) / ( nearPlane - farPlane );
-
-            return result;
-        }
-
-        [[nodiscard]] TransformUniform makeTransform( const std::chrono::nanoseconds elapsedTime ) noexcept
-        {
-            constexpr float DegreesToRadians = std::numbers::pi_v<float> / 180.0f;
-
-            static const Mat4 viewProjection =
-                multiply( makePerspectiveRhZo( 60.0f * DegreesToRadians, 1280.0f / 720.0f, 0.1f, 100.0f ),
-                          makeTranslation( 0.0f, 0.0f, -4.0f ) );
-
-            const float seconds = std::chrono::duration<float>{ elapsedTime }.count();
-            const Mat4  model = multiply( makeRotationY( seconds * 0.8f ), makeRotationX( -20.0f * DegreesToRadians ) );
-
-            return TransformUniform{ .mMvp = multiply( viewProjection, model ) };
-        }
-
-        constexpr std::array<Vertex, 8> CubeVertices{ {
-            { .mPosition = { -1.0F, -1.0F, -1.0F }, .mColor = { 1.0F, 0.2F, 0.2F } },
-            { .mPosition = { 1.0F, -1.0F, -1.0F }, .mColor = { 0.2F, 1.0F, 0.2F } },
-            { .mPosition = { 1.0F, 1.0F, -1.0F }, .mColor = { 0.2F, 0.4F, 1.0F } },
-            { .mPosition = { -1.0F, 1.0F, -1.0F }, .mColor = { 1.0F, 1.0F, 0.2F } },
-
-            { .mPosition = { -1.0F, -1.0F, 1.0F }, .mColor = { 1.0F, 0.2F, 1.0F } },
-            { .mPosition = { 1.0F, -1.0F, 1.0F }, .mColor = { 0.2F, 1.0F, 1.0F } },
-            { .mPosition = { 1.0F, 1.0F, 1.0F }, .mColor = { 1.0F, 1.0F, 1.0F } },
-            { .mPosition = { -1.0F, 1.0F, 1.0F }, .mColor = { 1.0F, 0.5F, 0.2F } },
-        } };
-
-        constexpr std::array<std::uint16_t, 36> CubeIndices{ {
-            // clang-format off
-            // Front
-            4, 5, 6,
-            6, 7, 4,
-
-            // Back
-            1, 0, 3,
-            3, 2, 1,
-
-            // Left
-            0, 4, 7,
-            7, 3, 0,
-
-            // Right
-            5, 1, 2,
-            2, 6, 5,
-
-            // Top
-            3, 7, 6,
-            6, 2, 3,
-
-            // Bottom
-            0, 1, 5,
-            5, 4, 0,
-            // clang-format on
-        } };
-    } // namespace
-
     DekoBackend::~DekoBackend()
     {
         if ( mQueue )
@@ -187,7 +17,7 @@ namespace doggo::platform::nx::deko
         }
     }
 
-    bool DekoBackend::initialize() noexcept
+    bool DekoBackend::initialize( const render::MeshData & meshData ) noexcept
     {
         if ( mIsInitialized )
         {
@@ -196,6 +26,14 @@ namespace doggo::platform::nx::deko
 
         mDevice = dk::UniqueDevice{ dk::DeviceMaker{}.create() };
         if ( !mDevice )
+        {
+            return false;
+        }
+
+        DOGGO_ASSERT( !meshData.mVertices.empty() );
+        DOGGO_ASSERT( !meshData.mIndices.empty() );
+
+        if ( meshData.mVertices.empty() || meshData.mIndices.empty() )
         {
             return false;
         }
@@ -265,18 +103,20 @@ namespace doggo::platform::nx::deko
 
         DkVtxAttribState positionAttribute = {};
         positionAttribute.bufferId         = 0;
-        positionAttribute.offset           = offsetof( Vertex, mPosition );
+        positionAttribute.offset           = offsetof( render::MeshVertex, mPosition );
         positionAttribute.size             = DkVtxAttribSize_3x32;
         positionAttribute.type             = DkVtxAttribType_Float;
 
         DkVtxAttribState colorAttribute = {};
         colorAttribute.bufferId         = 0;
-        colorAttribute.offset           = offsetof( Vertex, mColor );
+        colorAttribute.offset           = offsetof( render::MeshVertex, mColor );
         colorAttribute.size             = DkVtxAttribSize_3x32;
         colorAttribute.type             = DkVtxAttribType_Float;
 
-        const std::array     vertexAttributes   = { positionAttribute, colorAttribute };
-        constexpr std::array vertexBufferStates = { DkVtxBufferState{ .stride = sizeof( Vertex ), .divisor = 0 } };
+        const std::array vertexAttributes = { positionAttribute, colorAttribute };
+
+        constexpr std::array vertexBufferStates = {
+            DkVtxBufferState{ .stride = sizeof( render::MeshVertex ), .divisor = 0 } };
 
         const Result romfsResult = romfsInit();
 
@@ -295,9 +135,9 @@ namespace doggo::platform::nx::deko
             return false;
         }
 
-        constexpr std::uint32_t VertexBufferAlignment = 16;
+        const std::size_t vertexDataSize = meshData.mVertices.size_bytes();
 
-        const auto vertexMemory = mDataMemory.allocate( sizeof( CubeVertices ), VertexBufferAlignment );
+        const auto vertexMemory = mDataMemory.allocate( vertexDataSize, 16 );
 
         if ( !vertexMemory )
         {
@@ -305,9 +145,11 @@ namespace doggo::platform::nx::deko
         }
 
         mVertexMemory = *vertexMemory;
-        std::memcpy( mDataMemory.getCpuAddress( mVertexMemory ), CubeVertices.data(), sizeof( CubeVertices ) );
+        std::memcpy( mDataMemory.getCpuAddress( mVertexMemory ), meshData.mVertices.data(), vertexDataSize );
 
-        const auto indexMemory = mDataMemory.allocate( sizeof( CubeIndices ), alignof( std::uint16_t ) );
+        const std::size_t indexDataSize = meshData.mIndices.size_bytes();
+
+        const auto indexMemory = mDataMemory.allocate( indexDataSize, 16 );
 
         if ( !indexMemory )
         {
@@ -315,11 +157,13 @@ namespace doggo::platform::nx::deko
         }
 
         mIndexMemory = *indexMemory;
-        std::memcpy( mDataMemory.getCpuAddress( mIndexMemory ), CubeIndices.data(), sizeof( CubeIndices ) );
+        std::memcpy( mDataMemory.getCpuAddress( mIndexMemory ), meshData.mIndices.data(), indexDataSize );
+
+        mIndexCount = static_cast<std::uint32_t>( meshData.mIndices.size() );
 
         for ( std::size_t i = 0; i < sFramebufferCount; ++i )
         {
-            const auto transformMemory = mDataMemory.allocate( sizeof( TransformUniform ), DK_UNIFORM_BUF_ALIGNMENT );
+            const auto transformMemory = mDataMemory.allocate( mIndexCount, DK_UNIFORM_BUF_ALIGNMENT );
 
             if ( !transformMemory )
             {
@@ -419,7 +263,7 @@ namespace doggo::platform::nx::deko
         mCommandBuffer.bindVtxBuffer( 0, mDataMemory.getGpuAddress( mVertexMemory ), mVertexMemory.mSize );
         mCommandBuffer.bindIdxBuffer( DkIdxFormat_Uint16, mDataMemory.getGpuAddress( mIndexMemory ) );
 
-        mCommandBuffer.drawIndexed( DkPrimitive_Triangles, CubeIndices.size(), 1, 0, 0, 0 );
+        mCommandBuffer.drawIndexed( DkPrimitive_Triangles, mIndexCount, 1, 0, 0, 0 );
 
         mRenderCommands = mCommandBuffer.finishList();
 
@@ -434,7 +278,7 @@ namespace doggo::platform::nx::deko
         return true;
     }
 
-    void DekoBackend::renderFrame( const render::FrameInfo & frameInfo ) noexcept
+    void DekoBackend::renderFrame( const render::FrameInfo & /*frameInfo*/, const render::DrawData & drawData ) noexcept
     {
         DOGGO_ASSERT( mIsInitialized );
 
@@ -452,10 +296,8 @@ namespace doggo::platform::nx::deko
             return;
         }
 
-        const auto             frameSlot = static_cast<std::size_t>( slot );
-        const TransformUniform transform = makeTransform( frameInfo.mElapsedTime );
-
-        std::memcpy( mDataMemory.getCpuAddress( mTransformMemory[ frameSlot ] ), &transform, sizeof( transform ) );
+        const auto frameSlot = static_cast<std::size_t>( slot );
+        std::memcpy( mDataMemory.getCpuAddress( mTransformMemory[ frameSlot ] ), &drawData, sizeof( drawData ) );
 
         mQueue.submitCommands( mBindFramebufferCommands[ frameSlot ] );
         mQueue.submitCommands( mRenderCommands );

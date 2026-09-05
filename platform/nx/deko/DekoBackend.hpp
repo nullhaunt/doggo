@@ -48,11 +48,12 @@ namespace doggo::platform::nx::deko
         dk::UniqueMemBlock mShaderCodeMemory;
         std::uint32_t      mShaderCodeOffset = 0;
 
-        dk::Shader      mVertexShader;
+        dk::Shader mVertexShader;
+        dk::Shader mFragmentShader;
+
         DekoMemorySlice mVertexMemory;
         DekoMemorySlice mIndexMemory;
-
-        dk::Shader mFragmentShader;
+        DekoMemorySlice mTransformMemory;
 
         [[nodiscard]] bool loadShader( dk::Shader & shader, const char * path ) noexcept;
 

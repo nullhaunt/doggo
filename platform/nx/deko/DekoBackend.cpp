@@ -1,5 +1,6 @@
 #include "DekoBackend.hpp"
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -18,29 +19,148 @@ namespace doggo::platform::nx::deko
             float mColor[ 3 ];
         };
 
-        constexpr std::array<Vertex, 8> MeshVertices{ {
-            // Near quad: z = 0.25
-            { .mPosition = { -0.60F, -0.40F, 0.25F }, .mColor = { 1.00F, 0.20F, 0.20F } },
-            { .mPosition = { 0.40F, -0.40F, 0.25F }, .mColor = { 1.00F, 0.50F, 0.20F } },
-            { .mPosition = { 0.40F, 0.60F, 0.25F }, .mColor = { 1.00F, 0.80F, 0.20F } },
-            { .mPosition = { -0.60F, 0.60F, 0.25F }, .mColor = { 1.00F, 0.30F, 0.50F } },
+        struct Mat4
+        {
+            std::array<float, 16> m = {};
+        };
 
-            // Far quad: z = 0.75
-            { .mPosition = { -0.20F, -0.60F, 0.75F }, .mColor = { 0.20F, 0.40F, 1.00F } },
-            { .mPosition = { 0.70F, -0.60F, 0.75F }, .mColor = { 0.20F, 0.80F, 1.00F } },
-            { .mPosition = { 0.70F, 0.30F, 0.75F }, .mColor = { 0.40F, 0.30F, 1.00F } },
-            { .mPosition = { -0.20F, 0.30F, 0.75F }, .mColor = { 0.20F, 1.00F, 0.80F } },
+        struct alignas( 16 ) TransformUniform
+        {
+            Mat4 mMvp;
+        };
+
+        static_assert( sizeof( TransformUniform ) == 64 );
+
+        [[nodiscard]] Mat4 makeIdentity() noexcept
+        {
+            Mat4 result = {};
+
+            result.m[ 0 ]  = 1.0f;
+            result.m[ 5 ]  = 1.0f;
+            result.m[ 10 ] = 1.0f;
+            result.m[ 15 ] = 1.0f;
+
+            return result;
+        }
+
+        [[nodiscard]] Mat4 multiply( const Mat4 & a, const Mat4 & b ) noexcept
+        {
+            Mat4 result = {};
+
+            for ( std::size_t column = 0; column < 4; ++column )
+            {
+                for ( std::size_t row = 0; row < 4; ++row )
+                {
+                    result.m[ column * 4 + row ] =
+                        a.m[ 0 * 4 + row ] * b.m[ column * 4 + 0 ] + a.m[ 1 * 4 + row ] * b.m[ column * 4 + 1 ] +
+                        a.m[ 2 * 4 + row ] * b.m[ column * 4 + 2 ] + a.m[ 3 * 4 + row ] * b.m[ column * 4 + 3 ];
+                }
+            }
+
+            return result;
+        }
+
+        [[nodiscard]] Mat4 makeTranslation( float x, float y, float z ) noexcept
+        {
+            Mat4 result = makeIdentity();
+
+            result.m[ 12 ] = x;
+            result.m[ 13 ] = y;
+            result.m[ 14 ] = z;
+
+            return result;
+        }
+
+        [[nodiscard]] Mat4 makeRotationX( float radians ) noexcept
+        {
+            Mat4 result = makeIdentity();
+
+            const float cosine = std::cos( radians );
+            const float sine   = std::sin( radians );
+
+            result.m[ 5 ]  = cosine;
+            result.m[ 6 ]  = sine;
+            result.m[ 9 ]  = -sine;
+            result.m[ 10 ] = cosine;
+
+            return result;
+        }
+
+        [[nodiscard]] Mat4 makeRotationY( float radians ) noexcept
+        {
+            Mat4 result = makeIdentity();
+
+            const float cosine = std::cos( radians );
+            const float sine   = std::sin( radians );
+
+            result.m[ 0 ]  = cosine;
+            result.m[ 2 ]  = -sine;
+            result.m[ 8 ]  = sine;
+            result.m[ 10 ] = cosine;
+
+            return result;
+        }
+
+        [[nodiscard]] Mat4 makePerspectiveRhZo( float verticalFovRadians,
+                                                float aspectRatio,
+                                                float nearPlane,
+                                                float farPlane ) noexcept
+        {
+            DOGGO_ASSERT( verticalFovRadians > 0.0f );
+            DOGGO_ASSERT( aspectRatio > 0.0f );
+            DOGGO_ASSERT( nearPlane > 0.0f );
+            DOGGO_ASSERT( farPlane > nearPlane );
+
+            const float focalLength = 1.0f / std::tan( verticalFovRadians * 0.5f );
+
+            Mat4 result = {};
+
+            result.m[ 0 ]  = focalLength / aspectRatio;
+            result.m[ 5 ]  = focalLength;
+            result.m[ 10 ] = farPlane / ( nearPlane - farPlane );
+            result.m[ 11 ] = -1.0f;
+            result.m[ 14 ] = ( farPlane * nearPlane ) / ( nearPlane - farPlane );
+
+            return result;
+        }
+
+        constexpr std::array<Vertex, 8> CubeVertices{ {
+            { .mPosition = { -1.0F, -1.0F, -1.0F }, .mColor = { 1.0F, 0.2F, 0.2F } },
+            { .mPosition = { 1.0F, -1.0F, -1.0F }, .mColor = { 0.2F, 1.0F, 0.2F } },
+            { .mPosition = { 1.0F, 1.0F, -1.0F }, .mColor = { 0.2F, 0.4F, 1.0F } },
+            { .mPosition = { -1.0F, 1.0F, -1.0F }, .mColor = { 1.0F, 1.0F, 0.2F } },
+
+            { .mPosition = { -1.0F, -1.0F, 1.0F }, .mColor = { 1.0F, 0.2F, 1.0F } },
+            { .mPosition = { 1.0F, -1.0F, 1.0F }, .mColor = { 0.2F, 1.0F, 1.0F } },
+            { .mPosition = { 1.0F, 1.0F, 1.0F }, .mColor = { 1.0F, 1.0F, 1.0F } },
+            { .mPosition = { -1.0F, 1.0F, 1.0F }, .mColor = { 1.0F, 0.5F, 0.2F } },
         } };
 
-        constexpr std::array<std::uint16_t, 12> MeshIndices{ {
+        constexpr std::array<std::uint16_t, 36> CubeIndices{ {
             // clang-format off
-            // Near quad first
-            0, 1, 2,
-            2, 3, 0,
-
-            // Far quad second
+            // Front
             4, 5, 6,
             6, 7, 4,
+
+            // Back
+            1, 0, 3,
+            3, 2, 1,
+
+            // Left
+            0, 4, 7,
+            7, 3, 0,
+
+            // Right
+            5, 1, 2,
+            2, 6, 5,
+
+            // Top
+            3, 7, 6,
+            6, 2, 3,
+
+            // Bottom
+            0, 1, 5,
+            5, 4, 0,
             // clang-format on
         } };
     } // namespace
@@ -162,7 +282,8 @@ namespace doggo::platform::nx::deko
         }
 
         constexpr std::uint32_t VertexBufferAlignment = 16;
-        const auto              vertexMemory = mDataMemory.allocate( sizeof( MeshVertices ), VertexBufferAlignment );
+
+        const auto vertexMemory = mDataMemory.allocate( sizeof( CubeVertices ), VertexBufferAlignment );
 
         if ( !vertexMemory )
         {
@@ -170,9 +291,9 @@ namespace doggo::platform::nx::deko
         }
 
         mVertexMemory = *vertexMemory;
-        std::memcpy( mDataMemory.getCpuAddress( mVertexMemory ), MeshVertices.data(), sizeof( MeshVertices ) );
+        std::memcpy( mDataMemory.getCpuAddress( mVertexMemory ), CubeVertices.data(), sizeof( CubeVertices ) );
 
-        const auto indexMemory = mDataMemory.allocate( sizeof( MeshIndices ), alignof( std::uint16_t ) );
+        const auto indexMemory = mDataMemory.allocate( sizeof( CubeIndices ), alignof( std::uint16_t ) );
 
         if ( !indexMemory )
         {
@@ -180,8 +301,33 @@ namespace doggo::platform::nx::deko
         }
 
         mIndexMemory = *indexMemory;
+        std::memcpy( mDataMemory.getCpuAddress( mIndexMemory ), CubeIndices.data(), sizeof( CubeIndices ) );
 
-        std::memcpy( mDataMemory.getCpuAddress( mIndexMemory ), MeshIndices.data(), sizeof( MeshIndices ) );
+        const auto transformMemory = mDataMemory.allocate( sizeof( TransformUniform ), DK_UNIFORM_BUF_ALIGNMENT );
+
+        if ( !transformMemory )
+        {
+            return false;
+        }
+
+        mTransformMemory = *transformMemory;
+
+        constexpr float DegreesToRadians = std::numbers::pi_v<float> / 180.0f;
+
+        const Mat4 model =
+            multiply( makeRotationY( 35.0f * DegreesToRadians ), makeRotationX( -20.0f * DegreesToRadians ) );
+
+        const Mat4 view = makeTranslation( 0.0f, 0.0f, -4.0f );
+
+        const Mat4 projection =
+            makePerspectiveRhZo( 60.0f * DegreesToRadians,
+                                 static_cast<float>( sFramebufferWidth ) / static_cast<float>( sFramebufferHeight ),
+                                 0.1f,
+                                 100.0f );
+
+        const TransformUniform transform{ .mMvp = multiply( projection, multiply( view, model ) ) };
+
+        std::memcpy( mDataMemory.getCpuAddress( mTransformMemory ), &transform, sizeof( transform ) );
 
         std::array<DkImage const *, sFramebufferCount> swapChainImages = {};
 
@@ -255,10 +401,16 @@ namespace doggo::platform::nx::deko
         dk::DepthStencilState depthStencilState;
 
         mCommandBuffer.bindShaders( DkStageFlag_GraphicsMask, shaders );
+
+        rasterizerState.setCullMode( DkFace_None );
         mCommandBuffer.bindRasterizerState( rasterizerState );
+
         mCommandBuffer.bindColorState( colorState );
         mCommandBuffer.bindColorWriteState( colorWriteState );
         mCommandBuffer.bindDepthStencilState( depthStencilState );
+
+        mCommandBuffer.bindUniformBuffer(
+            DkStage_Vertex, 0, mDataMemory.getGpuAddress( mTransformMemory ), mTransformMemory.mSize );
 
         mCommandBuffer.bindVtxAttribState( vertexAttributes );
         mCommandBuffer.bindVtxBufferState( vertexBufferStates );
@@ -266,7 +418,7 @@ namespace doggo::platform::nx::deko
         mCommandBuffer.bindVtxBuffer( 0, mDataMemory.getGpuAddress( mVertexMemory ), mVertexMemory.mSize );
         mCommandBuffer.bindIdxBuffer( DkIdxFormat_Uint16, mDataMemory.getGpuAddress( mIndexMemory ) );
 
-        mCommandBuffer.drawIndexed( DkPrimitive_Triangles, MeshIndices.size(), 1, 0, 0, 0 );
+        mCommandBuffer.drawIndexed( DkPrimitive_Triangles, CubeIndices.size(), 1, 0, 0, 0 );
 
         mRenderCommands = mCommandBuffer.finishList();
 

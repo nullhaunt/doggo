@@ -15,11 +15,23 @@ namespace doggo::platform::nx::deko
         DekoBackend() = default;
         ~DekoBackend() override;
 
-        [[nodiscard]] bool initialize( const render::MeshData & meshData ) noexcept override;
-        void               renderFrame( const render::FrameInfo &         frameInfo,
-                                        std::span<const render::DrawData> draws ) noexcept override;
+        [[nodiscard]] bool initialize() noexcept override;
+
+        [[nodiscard]] render::MeshHandle createMesh( const render::MeshData & meshData ) noexcept override;
+
+        void renderFrame( const render::FrameInfo &           frameInfo,
+                          std::span<const render::DrawPacket> draws ) noexcept override;
 
       private:
+        static constexpr std::size_t sMeshCapacity = 8;
+
+        struct MeshResource
+        {
+            DekoMemorySlice mVertexMemory;
+            DekoMemorySlice mIndexMemory;
+            std::uint32_t   mIndexCount = 0;
+        };
+
         static constexpr std::size_t   sFramebufferCount  = 2;
         static constexpr std::uint32_t sFramebufferWidth  = 1280;
         static constexpr std::uint32_t sFramebufferHeight = 720;
@@ -49,7 +61,7 @@ namespace doggo::platform::nx::deko
 
         std::array<DkCmdList, sFramebufferCount>                                     mBindFramebufferCommands = {};
         DkCmdList                                                                    mRenderStateCommands     = {};
-        std::array<std::array<DkCmdList, sBootstrapDrawCapacity>, sFramebufferCount> mDrawCommands            = {};
+        std::array<std::array<DkCmdList, sBootstrapDrawCapacity>, sFramebufferCount> mBindTransformCommands   = {};
 
         dk::UniqueMemBlock mShaderCodeMemory;
         std::uint32_t      mShaderCodeOffset = 0;
@@ -57,14 +69,17 @@ namespace doggo::platform::nx::deko
         dk::Shader mVertexShader;
         dk::Shader mFragmentShader;
 
-        DekoMemorySlice                                mVertexMemory;
-        DekoMemorySlice                                mIndexMemory;
+        std::array<MeshResource, sMeshCapacity> mMeshes           = {};
+        std::array<DkCmdList, sMeshCapacity>    mMeshDrawCommands = {};
+        std::size_t                             mMeshCount        = 0;
+
         std::array<DekoMemorySlice, sFramebufferCount> mTransformMemory = {};
 
         std::uint32_t mIndexCount = 0;
 
         [[nodiscard]] bool loadShader( dk::Shader & shader, const char * path ) noexcept;
 
+      private:
         dk::UniqueQueue mQueue;
 
         bool mIsInitialized = false;

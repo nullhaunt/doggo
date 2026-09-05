@@ -17,7 +17,7 @@ namespace doggo::platform::nx::deko
         }
     }
 
-    bool DekoBackend::initialize( const render::MeshData & meshData ) noexcept
+    bool DekoBackend::initialize() noexcept
     {
         if ( mIsInitialized )
         {
@@ -26,14 +26,6 @@ namespace doggo::platform::nx::deko
 
         mDevice = dk::UniqueDevice{ dk::DeviceMaker{}.create() };
         if ( !mDevice )
-        {
-            return false;
-        }
-
-        DOGGO_ASSERT( !meshData.mVertices.empty() );
-        DOGGO_ASSERT( !meshData.mIndices.empty() );
-
-        if ( meshData.mVertices.empty() || meshData.mIndices.empty() )
         {
             return false;
         }
@@ -135,32 +127,6 @@ namespace doggo::platform::nx::deko
             return false;
         }
 
-        const std::size_t vertexDataSize = meshData.mVertices.size_bytes();
-
-        const auto vertexMemory = mDataMemory.allocate( vertexDataSize, 16 );
-
-        if ( !vertexMemory )
-        {
-            return false;
-        }
-
-        mVertexMemory = *vertexMemory;
-        std::memcpy( mDataMemory.getCpuAddress( mVertexMemory ), meshData.mVertices.data(), vertexDataSize );
-
-        const std::size_t indexDataSize = meshData.mIndices.size_bytes();
-
-        const auto indexMemory = mDataMemory.allocate( indexDataSize, 16 );
-
-        if ( !indexMemory )
-        {
-            return false;
-        }
-
-        mIndexMemory = *indexMemory;
-        std::memcpy( mDataMemory.getCpuAddress( mIndexMemory ), meshData.mIndices.data(), indexDataSize );
-
-        mIndexCount = static_cast<std::uint32_t>( meshData.mIndices.size() );
-
         constexpr std::uint32_t TransformMemoryPerFrame = sTransformStride * sBootstrapDrawCapacity;
 
         for ( std::size_t i = 0; i < sFramebufferCount; ++i )
@@ -258,9 +224,6 @@ namespace doggo::platform::nx::deko
         mCommandBuffer.bindVtxAttribState( vertexAttributes );
         mCommandBuffer.bindVtxBufferState( vertexBufferStates );
 
-        mCommandBuffer.bindVtxBuffer( 0, mDataMemory.getGpuAddress( mVertexMemory ), mVertexMemory.mSize );
-        mCommandBuffer.bindIdxBuffer( DkIdxFormat_Uint16, mDataMemory.getGpuAddress( mIndexMemory ) );
-
         mRenderStateCommands = mCommandBuffer.finishList();
 
         for ( std::size_t frameSlot = 0; frameSlot < sFramebufferCount; ++frameSlot )
@@ -272,9 +235,8 @@ namespace doggo::platform::nx::deko
                 const DkGpuAddr transformAddress = transformBase + drawSlot * sTransformStride;
 
                 mCommandBuffer.bindUniformBuffer( DkStage_Vertex, 0, transformAddress, sizeof( render::DrawData ) );
-                mCommandBuffer.drawIndexed( DkPrimitive_Triangles, mIndexCount, 1, 0, 0, 0 );
 
-                mDrawCommands[ frameSlot ][ drawSlot ] = mCommandBuffer.finishList();
+                mBindTransformCommands[ frameSlot ][ drawSlot ] = mCommandBuffer.finishList();
             }
         }
 
@@ -289,8 +251,58 @@ namespace doggo::platform::nx::deko
         return true;
     }
 
+    render::MeshHandle DekoBackend::createMesh( const render::MeshData & meshData ) noexcept
+    {
+        if ( !mIsInitialized || mMeshCount >= sMeshCapacity )
+        {
+            return {};
+        }
+
+        if ( meshData.mVertices.empty() || meshData.mIndices.empty() )
+        {
+            return {};
+        }
+
+        const std::size_t vertexSize = meshData.mVertices.size_bytes();
+
+        const auto vertexMemory = mDataMemory.allocate( vertexSize, 16 );
+
+        if ( !vertexMemory )
+        {
+            return {};
+        }
+
+        const std::size_t indexSize = meshData.mIndices.size_bytes();
+
+        const auto indexMemory = mDataMemory.allocate( indexSize, alignof( std::uint16_t ) );
+
+        if ( !indexMemory )
+        {
+            return {};
+        }
+
+        const std::size_t meshIndex = mMeshCount++;
+
+        MeshResource & mesh = mMeshes[ meshIndex ];
+
+        mesh.mVertexMemory = *vertexMemory;
+        mesh.mIndexMemory  = *indexMemory;
+        mesh.mIndexCount   = static_cast<std::uint32_t>( meshData.mIndices.size() );
+
+        std::memcpy( mDataMemory.getCpuAddress( mesh.mVertexMemory ), meshData.mVertices.data(), vertexSize );
+        std::memcpy( mDataMemory.getCpuAddress( mesh.mIndexMemory ), meshData.mIndices.data(), indexSize );
+
+        mCommandBuffer.bindVtxBuffer( 0, mDataMemory.getGpuAddress( mesh.mVertexMemory ), mesh.mVertexMemory.mSize );
+        mCommandBuffer.bindIdxBuffer( DkIdxFormat_Uint16, mDataMemory.getGpuAddress( mesh.mIndexMemory ) );
+
+        mCommandBuffer.drawIndexed( DkPrimitive_Triangles, mesh.mIndexCount, 1, 0, 0, 0 );
+        mMeshDrawCommands[ meshIndex ] = mCommandBuffer.finishList();
+
+        return render::MeshHandle{ .mIndex = static_cast<std::uint32_t>( meshIndex ) };
+    }
+
     void DekoBackend::renderFrame( const render::FrameInfo & /*frameInfo*/,
-                                   std::span<const render::DrawData> draws ) noexcept
+                                   std::span<const render::DrawPacket> draws ) noexcept
     {
         DOGGO_ASSERT( mIsInitialized );
 
@@ -317,8 +329,9 @@ namespace doggo::platform::nx::deko
 
         for ( std::size_t drawIndex = 0; drawIndex < drawCount; ++drawIndex )
         {
-            std::memcpy(
-                transformBase + drawIndex * sTransformStride, &draws[ drawIndex ], sizeof( render::DrawData ) );
+            std::memcpy( transformBase + drawIndex * sTransformStride,
+                         &draws[ drawIndex ].mDrawData,
+                         sizeof( render::DrawData ) );
         }
 
         mQueue.submitCommands( mBindFramebufferCommands[ frameSlot ] );
@@ -326,7 +339,18 @@ namespace doggo::platform::nx::deko
 
         for ( std::size_t drawIndex = 0; drawIndex < drawCount; ++drawIndex )
         {
-            mQueue.submitCommands( mDrawCommands[ frameSlot ][ drawIndex ] );
+            const render::MeshHandle mesh = draws[ drawIndex ].mMesh;
+
+            DOGGO_ASSERT( mesh.isValid() );
+            DOGGO_ASSERT( mesh.mIndex < mMeshCount );
+
+            if ( !mesh.isValid() || mesh.mIndex >= mMeshCount )
+            {
+                continue;
+            }
+
+            mQueue.submitCommands( mBindTransformCommands[ frameSlot ][ drawIndex ] );
+            mQueue.submitCommands( mMeshDrawCommands[ mesh.mIndex ] );
         }
 
         mQueue.presentImage( mSwapChain, slot );

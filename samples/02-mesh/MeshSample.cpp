@@ -146,14 +146,48 @@ namespace doggo::sample::mesh
             5, 4, 0,
             // clang-format on
         } };
+
+        constexpr std::array<render::MeshVertex, 5> PyramidVertices{ {
+            { .mPosition = { -1.0F, -1.0F, -1.0F }, .mColor = { 1.0F, 0.2F, 0.2F } },
+            { .mPosition = { 1.0F, -1.0F, -1.0F }, .mColor = { 0.2F, 1.0F, 0.2F } },
+            { .mPosition = { 1.0F, -1.0F, 1.0F }, .mColor = { 0.2F, 0.4F, 1.0F } },
+            { .mPosition = { -1.0F, -1.0F, 1.0F }, .mColor = { 1.0F, 1.0F, 0.2F } },
+            { .mPosition = { 0.0F, 1.0F, 0.0F }, .mColor = { 1.0F, 0.3F, 1.0F } },
+        } };
+
+        constexpr std::array<std::uint16_t, 18> PyramidIndices{ {
+            // clang-format off
+            // Base
+            0, 2, 1,
+            0, 3, 2,
+
+            // Sides
+            0, 1, 4,
+            1, 2, 4,
+            2, 3, 4,
+            3, 0, 4,
+            // clang-format on
+        } };
+
     } // namespace
 
     MeshSample::MeshSample() noexcept
-        : mMeshData{ .mVertices = CubeVertices, .mIndices = CubeIndices }
+        // clang-format off
+        : mMeshes{ {
+            {
+                .mVertices = CubeVertices,
+                .mIndices  = CubeIndices,
+            },
+            {
+                .mVertices = PyramidVertices,
+                .mIndices  = PyramidIndices
+            }
+        } }
+    // clang-format on
     {
     }
 
-    std::span<const render::DrawData> MeshSample::buildDrawData( const render::FrameInfo & frameInfo ) noexcept
+    std::span<const render::DrawRequest> MeshSample::buildDrawRequests( const render::FrameInfo & frameInfo ) noexcept
     {
         constexpr float      DegreesToRadians = std::numbers::pi_v<float> / 180.0f;
         constexpr std::array Positions        = { -2.5f, 0.0f, 2.5f };
@@ -178,7 +212,9 @@ namespace doggo::sample::mesh
                 const Mat4 model = multiply( makeTranslation( x, y, 0.0f ), rotation );
                 const Mat4 mvp   = multiply( viewProjection, model );
 
-                mDraws[ drawIndex ].mModelViewProjection = mvp.m;
+                mDraws[ drawIndex ] = render::DrawRequest{ .mMeshId   = static_cast<render::MeshId>( drawIndex % 2 ),
+                                                           .mDrawData = { .mModelViewProjection = mvp.m } };
+
                 ++drawIndex;
             }
         }
@@ -186,8 +222,8 @@ namespace doggo::sample::mesh
         return mDraws;
     }
 
-    const render::MeshData & MeshSample::getMeshData() const noexcept
+    std::span<const render::MeshData> MeshSample::getMeshes() const noexcept
     {
-        return mMeshData;
+        return mMeshes;
     }
 } // namespace doggo::sample::mesh

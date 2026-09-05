@@ -25,12 +25,38 @@ namespace doggo::render
         std::span<const std::uint16_t> mIndices;
     };
 
+    struct MeshHandle
+    {
+        static constexpr std::uint32_t sInvalidIndex = 0xFFFFFFFFu;
+
+        std::uint32_t mIndex = sInvalidIndex;
+
+        [[nodiscard]] bool isValid() const noexcept
+        {
+            return mIndex != sInvalidIndex;
+        }
+    };
+
+    using MeshId = std::uint32_t;
+
     struct alignas( 16 ) DrawData
     {
         std::array<float, 16> mModelViewProjection = {};
     };
 
     static_assert( sizeof( DrawData ) == 64 );
+
+    struct DrawRequest
+    {
+        MeshId   mMeshId = 0;
+        DrawData mDrawData;
+    };
+
+    struct DrawPacket
+    {
+        MeshHandle mMesh;
+        DrawData   mDrawData;
+    };
 
     class Backend
     {
@@ -44,14 +70,17 @@ namespace doggo::render
         Backend( Backend && )             = delete;
         Backend & operator=( Backend && ) = delete;
 
-        [[nodiscard]] virtual bool initialize( const MeshData & meshData ) noexcept                       = 0;
-        virtual void renderFrame( const FrameInfo & frameInfo, std::span<const DrawData> draws ) noexcept = 0;
+        [[nodiscard]] virtual bool initialize() noexcept = 0;
+
+        [[nodiscard]] virtual MeshHandle createMesh( const MeshData & meshData ) noexcept = 0;
+
+        virtual void renderFrame( const FrameInfo & frameInfo, std::span<const DrawPacket> draws ) noexcept = 0;
     };
 
     class NullBackend : public Backend
     {
       public:
-        [[nodiscard]] bool initialize( const MeshData & meshData ) noexcept override;
-        void renderFrame( const FrameInfo & frameInfo, std::span<const DrawData> draws ) noexcept override;
+        [[nodiscard]] bool initialize() noexcept override;
+        void renderFrame( const FrameInfo & frameInfo, std::span<const DrawPacket> draws ) noexcept override;
     };
 } // namespace doggo::render

@@ -9,14 +9,15 @@ namespace doggo::sample::mesh
       public:
         MeshSample() noexcept;
 
-        [[nodiscard]] std::span<const render::DrawData> buildDrawData(
+        [[nodiscard]] std::span<const render::DrawRequest> buildDrawRequests(
             const render::FrameInfo & frameInfo ) noexcept override;
-        [[nodiscard]] const render::MeshData & getMeshData() const noexcept override;
+        [[nodiscard]] std::span<const render::MeshData> getMeshes() const noexcept override;
 
       private:
+        static constexpr std::size_t sMeshCount = 2;
         static constexpr std::size_t sDrawCount = 9;
 
-        render::MeshData                         mMeshData;
-        std::array<render::DrawData, sDrawCount> mDraws = {};
+        std::array<render::MeshData, sMeshCount>    mMeshes = {};
+        std::array<render::DrawRequest, sDrawCount> mDraws  = {};
     };
 } // namespace doggo::sample::mesh

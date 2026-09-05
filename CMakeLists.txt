@@ -14,3 +14,4 @@ include(cmake/DoggoWarnings.cmake)
 
 add_subdirectory(engine)
 add_subdirectory(platform)
+add_subdirectory(samples/02-mesh)

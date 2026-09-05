@@ -33,6 +33,8 @@ namespace doggo::platform::nx::deko
 
         DekoMemoryArena mDataMemory;
 
+        dk::Image mDepthBuffer;
+
         dk::UniqueMemBlock                       mFramebufferMemory;
         std::array<dk::Image, sFramebufferCount> mFramebuffers = {};
         dk::UniqueSwapchain                      mSwapChain;
@@ -48,6 +50,7 @@ namespace doggo::platform::nx::deko
 
         dk::Shader      mVertexShader;
         DekoMemorySlice mVertexMemory;
+        DekoMemorySlice mIndexMemory;
 
         dk::Shader mFragmentShader;
 

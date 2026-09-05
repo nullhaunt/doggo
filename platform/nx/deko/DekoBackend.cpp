@@ -14,14 +14,34 @@ namespace doggo::platform::nx::deko
     {
         struct Vertex
         {
-            float mPosition[ 2 ];
+            float mPosition[ 3 ];
             float mColor[ 3 ];
         };
 
-        constexpr std::array<Vertex, 3> TriangleVertices{ {
-            { .mPosition = { 0.0f, 0.7f }, .mColor = { 1.0f, 0.2f, 0.2f } },
-            { .mPosition = { -0.7f, -0.7f }, .mColor = { 0.2f, 1.0f, 0.2f } },
-            { .mPosition = { 0.7f, -0.7f }, .mColor = { 0.2f, 0.4f, 1.0f } },
+        constexpr std::array<Vertex, 8> MeshVertices{ {
+            // Near quad: z = 0.25
+            { .mPosition = { -0.60F, -0.40F, 0.25F }, .mColor = { 1.00F, 0.20F, 0.20F } },
+            { .mPosition = { 0.40F, -0.40F, 0.25F }, .mColor = { 1.00F, 0.50F, 0.20F } },
+            { .mPosition = { 0.40F, 0.60F, 0.25F }, .mColor = { 1.00F, 0.80F, 0.20F } },
+            { .mPosition = { -0.60F, 0.60F, 0.25F }, .mColor = { 1.00F, 0.30F, 0.50F } },
+
+            // Far quad: z = 0.75
+            { .mPosition = { -0.20F, -0.60F, 0.75F }, .mColor = { 0.20F, 0.40F, 1.00F } },
+            { .mPosition = { 0.70F, -0.60F, 0.75F }, .mColor = { 0.20F, 0.80F, 1.00F } },
+            { .mPosition = { 0.70F, 0.30F, 0.75F }, .mColor = { 0.40F, 0.30F, 1.00F } },
+            { .mPosition = { -0.20F, 0.30F, 0.75F }, .mColor = { 0.20F, 1.00F, 0.80F } },
+        } };
+
+        constexpr std::array<std::uint16_t, 12> MeshIndices{ {
+            // clang-format off
+            // Near quad first
+            0, 1, 2,
+            2, 3, 0,
+
+            // Far quad second
+            4, 5, 6,
+            6, 7, 4,
+            // clang-format on
         } };
     } // namespace
 
@@ -52,8 +72,14 @@ namespace doggo::platform::nx::deko
             return false;
         }
 
-        dk::ImageLayout framebufferLayout;
+        dk::ImageLayout depthLayout;
+        dk::ImageLayoutMaker{ mDevice }
+            .setFlags( DkImageFlags_UsageRender | DkImageFlags_HwCompression )
+            .setFormat( DkImageFormat_Z24S8 )
+            .setDimensions( sFramebufferWidth, sFramebufferHeight )
+            .initialize( depthLayout );
 
+        dk::ImageLayout framebufferLayout;
         dk::ImageLayoutMaker{ mDevice }
             .setFlags( DkImageFlags_UsageRender | DkImageFlags_UsagePresent | DkImageFlags_HwCompression )
             .setFormat( DkImageFormat_RGBA8_Unorm )
@@ -61,22 +87,30 @@ namespace doggo::platform::nx::deko
             .initialize( framebufferLayout );
 
         const std::uint64_t framebufferAlignment = framebufferLayout.getAlignment();
-        if ( framebufferAlignment == 0 )
+        const std::uint64_t depthAlignment       = depthLayout.getAlignment();
+
+        if ( framebufferAlignment == 0 || depthAlignment == 0 )
         {
             return false;
         }
 
-        const std::uint64_t framebufferStride =
-            ( framebufferLayout.getSize() + framebufferAlignment - 1 ) / framebufferAlignment * framebufferAlignment;
+        const auto alignUp = []( const std::uint64_t value, const std::uint64_t alignment ) {
+            return ( ( value + alignment - 1 ) / alignment ) * alignment;
+        };
 
-        const std::uint64_t totalFramebufferSize = framebufferStride * sFramebufferCount;
-        if ( totalFramebufferSize > std::numeric_limits<std::uint32_t>::max() )
+        const std::uint64_t framebufferStride = alignUp( framebufferLayout.getSize(), framebufferAlignment );
+        const std::uint64_t colorBufferSize   = framebufferStride * sFramebufferCount;
+        const std::uint64_t depthOffset       = alignUp( colorBufferSize, depthAlignment );
+        const std::uint64_t imageDataSize     = depthOffset + depthLayout.getSize();
+        const std::uint64_t imageMemorySize   = alignUp( imageDataSize, DK_MEMBLOCK_ALIGNMENT );
+
+        if ( imageMemorySize > std::numeric_limits<std::uint32_t>::max() )
         {
             return false;
         }
 
         mFramebufferMemory =
-            dk::UniqueMemBlock{ dk::MemBlockMaker{ mDevice, static_cast<std::uint32_t>( totalFramebufferSize ) }
+            dk::UniqueMemBlock{ dk::MemBlockMaker{ mDevice, static_cast<std::uint32_t>( imageMemorySize ) }
                                     .setFlags( DkMemBlockFlags_GpuCached | DkMemBlockFlags_Image )
                                     .create() };
 
@@ -98,7 +132,7 @@ namespace doggo::platform::nx::deko
         DkVtxAttribState positionAttribute = {};
         positionAttribute.bufferId         = 0;
         positionAttribute.offset           = offsetof( Vertex, mPosition );
-        positionAttribute.size             = DkVtxAttribSize_2x32;
+        positionAttribute.size             = DkVtxAttribSize_3x32;
         positionAttribute.type             = DkVtxAttribType_Float;
 
         DkVtxAttribState colorAttribute = {};
@@ -128,7 +162,7 @@ namespace doggo::platform::nx::deko
         }
 
         constexpr std::uint32_t VertexBufferAlignment = 16;
-        const auto vertexMemory = mDataMemory.allocate( sizeof( TriangleVertices ), VertexBufferAlignment );
+        const auto              vertexMemory = mDataMemory.allocate( sizeof( MeshVertices ), VertexBufferAlignment );
 
         if ( !vertexMemory )
         {
@@ -136,7 +170,18 @@ namespace doggo::platform::nx::deko
         }
 
         mVertexMemory = *vertexMemory;
-        std::memcpy( mDataMemory.getCpuAddress( mVertexMemory ), TriangleVertices.data(), sizeof( TriangleVertices ) );
+        std::memcpy( mDataMemory.getCpuAddress( mVertexMemory ), MeshVertices.data(), sizeof( MeshVertices ) );
+
+        const auto indexMemory = mDataMemory.allocate( sizeof( MeshIndices ), alignof( std::uint16_t ) );
+
+        if ( !indexMemory )
+        {
+            return false;
+        }
+
+        mIndexMemory = *indexMemory;
+
+        std::memcpy( mDataMemory.getCpuAddress( mIndexMemory ), MeshIndices.data(), sizeof( MeshIndices ) );
 
         std::array<DkImage const *, sFramebufferCount> swapChainImages = {};
 
@@ -147,6 +192,8 @@ namespace doggo::platform::nx::deko
 
             swapChainImages[ i ] = &mFramebuffers[ i ];
         }
+
+        mDepthBuffer.initialize( depthLayout, mFramebufferMemory, static_cast<std::uint32_t>( depthOffset ) );
 
         mSwapChain =
             dk::UniqueSwapchain{ dk::SwapchainMaker{ mDevice, nwindowGetDefault(), swapChainImages }.create() };
@@ -174,12 +221,14 @@ namespace doggo::platform::nx::deko
 
         mCommandBuffer.addMemory( mDataMemory.getMemoryBlock(), mCommandMemory.mOffset, mCommandMemory.mSize );
 
+        dk::ImageView depthTarget{ mDepthBuffer };
+
         for ( std::size_t i = 0; i < sFramebufferCount; ++i )
         {
-            dk::ImageView                      imageView{ mFramebuffers[ i ] };
-            std::array<DkImageView const *, 1> colorTargets{ &imageView };
+            dk::ImageView                      colorTarget{ mFramebuffers[ i ] };
+            std::array<DkImageView const *, 1> colorTargets{ &colorTarget };
 
-            mCommandBuffer.bindRenderTargets( colorTargets );
+            mCommandBuffer.bindRenderTargets( colorTargets, &depthTarget );
             mBindFramebufferCommands[ i ] = mCommandBuffer.finishList();
         }
 
@@ -196,24 +245,28 @@ namespace doggo::platform::nx::deko
         mCommandBuffer.setScissors( 0, scissor );
 
         mCommandBuffer.clearColor( 0, DkColorMask_RGBA, 0.08f, 0.12f, 0.18f, 1.0f );
+        mCommandBuffer.clearDepthStencil( true, 1.0f, 0xFF, 0 );
 
         const std::array<DkShader const *, 2> shaders{ &mVertexShader, &mFragmentShader };
 
-        dk::RasterizerState rasterizerState;
-        dk::ColorState      colorState;
-        dk::ColorWriteState colorWriteState;
+        dk::RasterizerState   rasterizerState;
+        dk::ColorState        colorState;
+        dk::ColorWriteState   colorWriteState;
+        dk::DepthStencilState depthStencilState;
 
         mCommandBuffer.bindShaders( DkStageFlag_GraphicsMask, shaders );
         mCommandBuffer.bindRasterizerState( rasterizerState );
         mCommandBuffer.bindColorState( colorState );
         mCommandBuffer.bindColorWriteState( colorWriteState );
+        mCommandBuffer.bindDepthStencilState( depthStencilState );
 
         mCommandBuffer.bindVtxAttribState( vertexAttributes );
         mCommandBuffer.bindVtxBufferState( vertexBufferStates );
 
         mCommandBuffer.bindVtxBuffer( 0, mDataMemory.getGpuAddress( mVertexMemory ), mVertexMemory.mSize );
+        mCommandBuffer.bindIdxBuffer( DkIdxFormat_Uint16, mDataMemory.getGpuAddress( mIndexMemory ) );
 
-        mCommandBuffer.draw( DkPrimitive_Triangles, 3, 1, 0, 0 );
+        mCommandBuffer.drawIndexed( DkPrimitive_Triangles, MeshIndices.size(), 1, 0, 0, 0 );
 
         mRenderCommands = mCommandBuffer.finishList();
 

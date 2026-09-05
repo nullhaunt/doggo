@@ -7,7 +7,7 @@ namespace doggo::render
         return true;
     }
 
-    void NullBackend::renderFrame() noexcept
+    void NullBackend::renderFrame( const FrameInfo & /*frameInfo*/ ) noexcept
     {
     }
 } // namespace doggo::render

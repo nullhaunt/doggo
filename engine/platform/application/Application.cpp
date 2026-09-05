@@ -66,7 +66,12 @@ namespace doggo
 
                 {
                     profiling::CpuScope renderScope{ cpuProfiler, "Render" };
-                    renderer.renderFrame();
+
+                    const render::FrameInfo frameInfo{ .mFrameIndex  = frameTimer.getFrameIndex(),
+                                                       .mDeltaTime   = frameTimer.getDeltaTime(),
+                                                       .mElapsedTime = frameTimer.getElapsedTime() };
+
+                    renderer.renderFrame( frameInfo );
                 }
             }
         }

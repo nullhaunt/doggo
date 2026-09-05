@@ -1,7 +1,16 @@
 #pragma once
 
+#include <chrono>
+
 namespace doggo::render
 {
+    struct FrameInfo
+    {
+        std::uint64_t            mFrameIndex  = 0;
+        std::chrono::nanoseconds mDeltaTime   = {};
+        std::chrono::nanoseconds mElapsedTime = {};
+    };
+
     class Backend
     {
       public:
@@ -14,14 +23,14 @@ namespace doggo::render
         Backend( Backend && )             = delete;
         Backend & operator=( Backend && ) = delete;
 
-        [[nodiscard]] virtual bool initialize() noexcept  = 0;
-        virtual void               renderFrame() noexcept = 0;
+        [[nodiscard]] virtual bool initialize() noexcept                               = 0;
+        virtual void               renderFrame( const FrameInfo & frameInfo ) noexcept = 0;
     };
 
     class NullBackend : public Backend
     {
       public:
         [[nodiscard]] bool initialize() noexcept override;
-        void               renderFrame() noexcept override;
+        void               renderFrame( const FrameInfo & frameInfo ) noexcept override;
     };
 } // namespace doggo::render

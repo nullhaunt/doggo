@@ -124,6 +124,20 @@ namespace doggo::platform::nx::deko
             return result;
         }
 
+        [[nodiscard]] TransformUniform makeTransform( const std::chrono::nanoseconds elapsedTime ) noexcept
+        {
+            constexpr float DegreesToRadians = std::numbers::pi_v<float> / 180.0f;
+
+            static const Mat4 viewProjection =
+                multiply( makePerspectiveRhZo( 60.0f * DegreesToRadians, 1280.0f / 720.0f, 0.1f, 100.0f ),
+                          makeTranslation( 0.0f, 0.0f, -4.0f ) );
+
+            const float seconds = std::chrono::duration<float>{ elapsedTime }.count();
+            const Mat4  model = multiply( makeRotationY( seconds * 0.8f ), makeRotationX( -20.0f * DegreesToRadians ) );
+
+            return TransformUniform{ .mMvp = multiply( viewProjection, model ) };
+        }
+
         constexpr std::array<Vertex, 8> CubeVertices{ {
             { .mPosition = { -1.0F, -1.0F, -1.0F }, .mColor = { 1.0F, 0.2F, 0.2F } },
             { .mPosition = { 1.0F, -1.0F, -1.0F }, .mColor = { 0.2F, 1.0F, 0.2F } },
@@ -303,31 +317,17 @@ namespace doggo::platform::nx::deko
         mIndexMemory = *indexMemory;
         std::memcpy( mDataMemory.getCpuAddress( mIndexMemory ), CubeIndices.data(), sizeof( CubeIndices ) );
 
-        const auto transformMemory = mDataMemory.allocate( sizeof( TransformUniform ), DK_UNIFORM_BUF_ALIGNMENT );
-
-        if ( !transformMemory )
+        for ( std::size_t i = 0; i < sFramebufferCount; ++i )
         {
-            return false;
+            const auto transformMemory = mDataMemory.allocate( sizeof( TransformUniform ), DK_UNIFORM_BUF_ALIGNMENT );
+
+            if ( !transformMemory )
+            {
+                return false;
+            }
+
+            mTransformMemory[ i ] = *transformMemory;
         }
-
-        mTransformMemory = *transformMemory;
-
-        constexpr float DegreesToRadians = std::numbers::pi_v<float> / 180.0f;
-
-        const Mat4 model =
-            multiply( makeRotationY( 35.0f * DegreesToRadians ), makeRotationX( -20.0f * DegreesToRadians ) );
-
-        const Mat4 view = makeTranslation( 0.0f, 0.0f, -4.0f );
-
-        const Mat4 projection =
-            makePerspectiveRhZo( 60.0f * DegreesToRadians,
-                                 static_cast<float>( sFramebufferWidth ) / static_cast<float>( sFramebufferHeight ),
-                                 0.1f,
-                                 100.0f );
-
-        const TransformUniform transform{ .mMvp = multiply( projection, multiply( view, model ) ) };
-
-        std::memcpy( mDataMemory.getCpuAddress( mTransformMemory ), &transform, sizeof( transform ) );
 
         std::array<DkImage const *, sFramebufferCount> swapChainImages = {};
 
@@ -375,6 +375,10 @@ namespace doggo::platform::nx::deko
             std::array<DkImageView const *, 1> colorTargets{ &colorTarget };
 
             mCommandBuffer.bindRenderTargets( colorTargets, &depthTarget );
+
+            mCommandBuffer.bindUniformBuffer(
+                DkStage_Vertex, 0, mDataMemory.getGpuAddress( mTransformMemory[ i ] ), mTransformMemory[ i ].mSize );
+
             mBindFramebufferCommands[ i ] = mCommandBuffer.finishList();
         }
 
@@ -409,9 +413,6 @@ namespace doggo::platform::nx::deko
         mCommandBuffer.bindColorWriteState( colorWriteState );
         mCommandBuffer.bindDepthStencilState( depthStencilState );
 
-        mCommandBuffer.bindUniformBuffer(
-            DkStage_Vertex, 0, mDataMemory.getGpuAddress( mTransformMemory ), mTransformMemory.mSize );
-
         mCommandBuffer.bindVtxAttribState( vertexAttributes );
         mCommandBuffer.bindVtxBufferState( vertexBufferStates );
 
@@ -433,7 +434,7 @@ namespace doggo::platform::nx::deko
         return true;
     }
 
-    void DekoBackend::renderFrame() noexcept
+    void DekoBackend::renderFrame( const render::FrameInfo & frameInfo ) noexcept
     {
         DOGGO_ASSERT( mIsInitialized );
 
@@ -451,7 +452,12 @@ namespace doggo::platform::nx::deko
             return;
         }
 
-        mQueue.submitCommands( mBindFramebufferCommands[ static_cast<std::size_t>( slot ) ] );
+        const auto             frameSlot = static_cast<std::size_t>( slot );
+        const TransformUniform transform = makeTransform( frameInfo.mElapsedTime );
+
+        std::memcpy( mDataMemory.getCpuAddress( mTransformMemory[ frameSlot ] ), &transform, sizeof( transform ) );
+
+        mQueue.submitCommands( mBindFramebufferCommands[ frameSlot ] );
         mQueue.submitCommands( mRenderCommands );
         mQueue.presentImage( mSwapChain, slot );
     }

@@ -161,33 +161,46 @@ namespace doggo::platform::nx::deko
             return false;
         }
 
-        mCommandBuffer = dk::UniqueCmdBuf{ dk::CmdBufMaker{ mDevice }.create() };
+        mStaticCommandBuffer = dk::UniqueCmdBuf{ dk::CmdBufMaker{ mDevice }.create() };
 
-        if ( !mCommandBuffer )
+        if ( !mStaticCommandBuffer )
         {
             return false;
         }
 
-        const auto commandMemory = mDataMemory.allocate( sCommandMemorySize, DK_CMDMEM_ALIGNMENT );
+        const auto staticCommandMemory = mDataMemory.allocate( sStaticCommandMemorySize, DK_CMDMEM_ALIGNMENT );
+
+        if ( !staticCommandMemory )
+        {
+            return false;
+        }
+
+        mStaticCommandMemory = *staticCommandMemory;
+
+        mStaticCommandBuffer.addMemory(
+            mDataMemory.getMemoryBlock(), mStaticCommandMemory.mOffset, mStaticCommandMemory.mSize );
+
+        const auto commandMemory = mDataMemory.allocate( sStaticCommandMemorySize, DK_CMDMEM_ALIGNMENT );
 
         if ( !commandMemory )
         {
             return false;
         }
 
-        mCommandMemory = *commandMemory;
+        mStaticCommandMemory = *commandMemory;
 
-        mCommandBuffer.addMemory( mDataMemory.getMemoryBlock(), mCommandMemory.mOffset, mCommandMemory.mSize );
+        mStaticCommandBuffer.addMemory(
+            mDataMemory.getMemoryBlock(), mStaticCommandMemory.mOffset, mStaticCommandMemory.mSize );
 
-        dk::ImageView depthTarget{ mDepthBuffer };
+        dk::ImageView depthTarget = { mDepthBuffer };
 
         for ( std::size_t i = 0; i < sFramebufferCount; ++i )
         {
             dk::ImageView                      colorTarget  = { mFramebuffers[ i ] };
             std::array<DkImageView const *, 1> colorTargets = { &colorTarget };
 
-            mCommandBuffer.bindRenderTargets( colorTargets, &depthTarget );
-            mBindFramebufferCommands[ i ] = mCommandBuffer.finishList();
+            mStaticCommandBuffer.bindRenderTargets( colorTargets, &depthTarget );
+            mBindFramebufferCommands[ i ] = mStaticCommandBuffer.finishList();
         }
 
         constexpr DkViewport viewport{ .x      = 0.0f,
@@ -199,11 +212,11 @@ namespace doggo::platform::nx::deko
 
         constexpr DkScissor scissor{ .x = 0, .y = 0, .width = sFramebufferWidth, .height = sFramebufferHeight };
 
-        mCommandBuffer.setViewports( 0, viewport );
-        mCommandBuffer.setScissors( 0, scissor );
+        mStaticCommandBuffer.setViewports( 0, viewport );
+        mStaticCommandBuffer.setScissors( 0, scissor );
 
-        mCommandBuffer.clearColor( 0, DkColorMask_RGBA, 0.08f, 0.12f, 0.18f, 1.0f );
-        mCommandBuffer.clearDepthStencil( true, 1.0f, 0xFF, 0 );
+        mStaticCommandBuffer.clearColor( 0, DkColorMask_RGBA, 0.08f, 0.12f, 0.18f, 1.0f );
+        mStaticCommandBuffer.clearDepthStencil( true, 1.0f, 0xFF, 0 );
 
         const std::array<DkShader const *, 2> shaders = { &mVertexShader, &mFragmentShader };
 
@@ -212,32 +225,41 @@ namespace doggo::platform::nx::deko
         dk::ColorWriteState   colorWriteState;
         dk::DepthStencilState depthStencilState;
 
-        mCommandBuffer.bindShaders( DkStageFlag_GraphicsMask, shaders );
+        mStaticCommandBuffer.bindShaders( DkStageFlag_GraphicsMask, shaders );
 
         rasterizerState.setCullMode( DkFace_None );
-        mCommandBuffer.bindRasterizerState( rasterizerState );
+        mStaticCommandBuffer.bindRasterizerState( rasterizerState );
 
-        mCommandBuffer.bindColorState( colorState );
-        mCommandBuffer.bindColorWriteState( colorWriteState );
-        mCommandBuffer.bindDepthStencilState( depthStencilState );
+        mStaticCommandBuffer.bindColorState( colorState );
+        mStaticCommandBuffer.bindColorWriteState( colorWriteState );
+        mStaticCommandBuffer.bindDepthStencilState( depthStencilState );
 
-        mCommandBuffer.bindVtxAttribState( vertexAttributes );
-        mCommandBuffer.bindVtxBufferState( vertexBufferStates );
+        mStaticCommandBuffer.bindVtxAttribState( vertexAttributes );
+        mStaticCommandBuffer.bindVtxBufferState( vertexBufferStates );
 
-        mRenderStateCommands = mCommandBuffer.finishList();
+        mRenderStateCommands = mStaticCommandBuffer.finishList();
 
         for ( std::size_t frameSlot = 0; frameSlot < sFramebufferCount; ++frameSlot )
         {
-            const DkGpuAddr transformBase = mDataMemory.getGpuAddress( mTransformMemory[ frameSlot ] );
+            mFrameCommandBuffers[ frameSlot ] = dk::UniqueCmdBuf{ dk::CmdBufMaker{ mDevice }.create() };
 
-            for ( std::size_t drawSlot = 0; drawSlot < sBootstrapDrawCapacity; ++drawSlot )
+            if ( !mFrameCommandBuffers[ frameSlot ] )
             {
-                const DkGpuAddr transformAddress = transformBase + drawSlot * sTransformStride;
-
-                mCommandBuffer.bindUniformBuffer( DkStage_Vertex, 0, transformAddress, sizeof( render::DrawData ) );
-
-                mBindTransformCommands[ frameSlot ][ drawSlot ] = mCommandBuffer.finishList();
+                return false;
             }
+
+            const auto frameCommandMemory = mDataMemory.allocate( sFrameCommandMemorySize, DK_CMDMEM_ALIGNMENT );
+
+            if ( !frameCommandMemory )
+            {
+                return false;
+            }
+
+            mFrameCommandMemory[ frameSlot ] = *frameCommandMemory;
+
+            mFrameCommandBuffers[ frameSlot ].addMemory( mDataMemory.getMemoryBlock(),
+                                                         mFrameCommandMemory[ frameSlot ].mOffset,
+                                                         mFrameCommandMemory[ frameSlot ].mSize );
         }
 
         mQueue = dk::UniqueQueue{ dk::QueueMaker{ mDevice }.setFlags( DkQueueFlags_Graphics ).create() };
@@ -292,12 +314,6 @@ namespace doggo::platform::nx::deko
         std::memcpy( mDataMemory.getCpuAddress( mesh.mVertexMemory ), meshData.mVertices.data(), vertexSize );
         std::memcpy( mDataMemory.getCpuAddress( mesh.mIndexMemory ), meshData.mIndices.data(), indexSize );
 
-        mCommandBuffer.bindVtxBuffer( 0, mDataMemory.getGpuAddress( mesh.mVertexMemory ), mesh.mVertexMemory.mSize );
-        mCommandBuffer.bindIdxBuffer( DkIdxFormat_Uint16, mDataMemory.getGpuAddress( mesh.mIndexMemory ) );
-
-        mCommandBuffer.drawIndexed( DkPrimitive_Triangles, mesh.mIndexCount, 1, 0, 0, 0 );
-        mMeshDrawCommands[ meshIndex ] = mCommandBuffer.finishList();
-
         return render::MeshHandle{ .mIndex = static_cast<std::uint32_t>( meshIndex ) };
     }
 
@@ -343,24 +359,38 @@ namespace doggo::platform::nx::deko
                          sizeof( render::DrawData ) );
         }
 
-        mQueue.submitCommands( mBindFramebufferCommands[ frameSlot ] );
-        mQueue.submitCommands( mRenderStateCommands );
+        dk::CmdBuf & frameCommands = mFrameCommandBuffers[ frameSlot ];
+        frameCommands.clear();
 
         for ( std::size_t drawIndex = 0; drawIndex < drawCount; ++drawIndex )
         {
-            const render::MeshHandle mesh = draws[ drawIndex ].mMesh;
+            const render::MeshHandle handle = draws[ drawIndex ].mMesh;
 
-            DOGGO_ASSERT( mesh.isValid() );
-            DOGGO_ASSERT( mesh.mIndex < mMeshCount );
+            DOGGO_ASSERT( handle.isValid() );
+            DOGGO_ASSERT( handle.mIndex < mMeshCount );
 
-            if ( !mesh.isValid() || mesh.mIndex >= mMeshCount )
+            if ( !handle.isValid() || handle.mIndex >= mMeshCount )
             {
                 continue;
             }
 
-            mQueue.submitCommands( mBindTransformCommands[ frameSlot ][ drawIndex ] );
-            mQueue.submitCommands( mMeshDrawCommands[ mesh.mIndex ] );
+            const MeshResource & mesh = mMeshes[ handle.mIndex ];
+
+            const DkGpuAddr transformAddress =
+                mDataMemory.getGpuAddress( mTransformMemory[ frameSlot ] ) + drawIndex * sTransformStride;
+
+            frameCommands.bindUniformBuffer( DkStage_Vertex, 0, transformAddress, sizeof( render::DrawData ) );
+            frameCommands.bindVtxBuffer( 0, mDataMemory.getGpuAddress( mesh.mVertexMemory ), mesh.mVertexMemory.mSize );
+            frameCommands.bindIdxBuffer( DkIdxFormat_Uint16, mDataMemory.getGpuAddress( mesh.mIndexMemory ) );
+
+            frameCommands.drawIndexed( DkPrimitive_Triangles, mesh.mIndexCount, 1, 0, 0, 0 );
         }
+
+        const DkCmdList drawCommands = frameCommands.finishList();
+
+        mQueue.submitCommands( mBindFramebufferCommands[ frameSlot ] );
+        mQueue.submitCommands( mRenderStateCommands );
+        mQueue.submitCommands( drawCommands );
 
         mQueue.signalFence( mFrameFences[ frameSlot ], false );
         mQueue.presentImage( mSwapChain, slot );

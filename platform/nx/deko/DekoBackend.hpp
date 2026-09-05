@@ -36,14 +36,18 @@ namespace doggo::platform::nx::deko
         static constexpr std::uint32_t sFramebufferWidth  = 1280;
         static constexpr std::uint32_t sFramebufferHeight = 720;
 
-        static constexpr std::uint32_t sCommandMemorySize = 64 * 1024;
-        static_assert( sCommandMemorySize % DK_CMDMEM_ALIGNMENT == 0 );
+        static constexpr std::uint32_t sStaticCommandMemorySize = 64 * 1024;
+        static constexpr std::uint32_t sFrameCommandMemorySize  = 64 * 1024;
+
+        static_assert( sStaticCommandMemorySize % DK_CMDMEM_ALIGNMENT == 0 );
+        static_assert( sFrameCommandMemorySize % DK_CMDMEM_ALIGNMENT == 0 );
 
         static constexpr std::uint32_t sShaderCodeMemorySize = 64 * 1024;
         static constexpr std::uint32_t sDataMemorySize       = 1024 * 1024;
 
         static constexpr std::size_t   sBootstrapDrawCapacity = 16;
         static constexpr std::uint32_t sTransformStride       = DK_UNIFORM_BUF_ALIGNMENT;
+
         static_assert( sizeof( render::DrawData ) <= sTransformStride );
 
         dk::UniqueDevice mDevice;
@@ -58,12 +62,14 @@ namespace doggo::platform::nx::deko
 
         std::array<dk::Fence, sFramebufferCount> mFrameFences = {};
 
-        dk::UniqueCmdBuf mCommandBuffer;
-        DekoMemorySlice  mCommandMemory;
+        dk::UniqueCmdBuf mStaticCommandBuffer;
+        DekoMemorySlice  mStaticCommandMemory;
 
-        std::array<DkCmdList, sFramebufferCount>                                     mBindFramebufferCommands = {};
-        DkCmdList                                                                    mRenderStateCommands     = {};
-        std::array<std::array<DkCmdList, sBootstrapDrawCapacity>, sFramebufferCount> mBindTransformCommands   = {};
+        std::array<dk::UniqueCmdBuf, sFramebufferCount> mFrameCommandBuffers = {};
+        std::array<DekoMemorySlice, sFramebufferCount>  mFrameCommandMemory  = {};
+
+        std::array<DkCmdList, sFramebufferCount> mBindFramebufferCommands = {};
+        DkCmdList                                mRenderStateCommands     = {};
 
         dk::UniqueMemBlock mShaderCodeMemory;
         std::uint32_t      mShaderCodeOffset = 0;
@@ -71,9 +77,8 @@ namespace doggo::platform::nx::deko
         dk::Shader mVertexShader;
         dk::Shader mFragmentShader;
 
-        std::array<MeshResource, sMeshCapacity> mMeshes           = {};
-        std::array<DkCmdList, sMeshCapacity>    mMeshDrawCommands = {};
-        std::size_t                             mMeshCount        = 0;
+        std::array<MeshResource, sMeshCapacity> mMeshes    = {};
+        std::size_t                             mMeshCount = 0;
 
         std::array<DekoMemorySlice, sFramebufferCount> mTransformMemory = {};
 

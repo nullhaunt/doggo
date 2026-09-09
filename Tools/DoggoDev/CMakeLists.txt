@@ -6,8 +6,19 @@ project(DoggoDev
         LANGUAGES CXX
 )
 
+find_package(ZLIB REQUIRED)
+
 add_executable(doggo-dev
+        src/Arguments.cpp
         src/Main.cpp
+        src/NetloaderClient.cpp
+        src/Network.cpp
+)
+
+target_include_directories(doggo-dev
+        PRIVATE
+        src
+        ../../Engine/include
 )
 
 target_compile_features(doggo-dev
@@ -18,6 +29,15 @@ target_compile_features(doggo-dev
 set_target_properties(doggo-dev PROPERTIES
         CXX_EXTENSIONS OFF
 )
+
+target_link_libraries(doggo-dev
+        PRIVATE
+        ZLIB::ZLIB
+)
+
+if (WIN32)
+    target_link_libraries(doggo-dev PRIVATE ws2_32)
+endif ()
 
 if (MSVC)
     target_compile_options(doggo-dev PRIVATE

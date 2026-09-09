@@ -1,6 +1,6 @@
 #pragma once
 
-#include "doggo/log/Log.hpp"
+#include "doggo/log/log_Log.hpp"
 
 #include <string_view>
 
@@ -13,14 +13,14 @@ namespace doggo::platform::nx
       void flush() noexcept override;
   };
 
-  class NxlinkLogSink final : public log::Sink
+  class DoggoDevLogSink final : public log::Sink
   {
-      DOGGO_DISALLOW_COPY( NxlinkLogSink );
-      DOGGO_DISALLOW_MOVE( NxlinkLogSink );
+      DOGGO_DISALLOW_COPY( DoggoDevLogSink );
+      DOGGO_DISALLOW_MOVE( DoggoDevLogSink );
 
     public:
-      NxlinkLogSink() = default;
-      ~NxlinkLogSink() override;
+      DoggoDevLogSink() = default;
+      ~DoggoDevLogSink() override;
 
       [[nodiscard]] bool initialize() noexcept;
       void               finalize() noexcept;

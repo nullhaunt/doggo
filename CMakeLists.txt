@@ -21,11 +21,11 @@ endif ()
 # workspace. The game NRO already depends on the game executable, which in turn
 # depends on the engine, but keeping a named aggregate target makes presets and
 # IDE usage unambiguous.
-if (TARGET game_nro)
+if (TARGET doggo_game_nro)
     add_custom_target(doggo_all
             DEPENDS
             doggo_platform_nx
-            game_nro
+            doggo_game_nro
     )
 else ()
     add_custom_target(doggo_all

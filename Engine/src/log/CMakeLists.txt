@@ -1,5 +1,5 @@
 add_library(doggo_log STATIC
-        Log.cpp
+        log_Log.cpp
 )
 
 add_library(doggo::log ALIAS doggo_log)

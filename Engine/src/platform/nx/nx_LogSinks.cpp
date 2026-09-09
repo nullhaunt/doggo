@@ -1,9 +1,12 @@
-#include "nx_LogSinks.hpp"
+#include "doggo/platform/nx/nx_LogSinks.hpp"
+
+#include "doggo/dev/dev_RemoteLogProtocol.hpp"
 
 #include <switch.h>
 
 #include <arpa/inet.h>
 #include <cstdio>
+#include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -11,9 +14,6 @@ namespace doggo::platform::nx
 {
   namespace
   {
-    constexpr int          NxlinkConnectAttempts       = 4;
-    constexpr std::int64_t NxlinkRetryDelayNanoseconds = 50'000'000;
-
 #ifdef MSG_NOSIGNAL
     constexpr int SendFlags = MSG_NOSIGNAL;
 #else
@@ -31,19 +31,19 @@ namespace doggo::platform::nx
     std::fflush( stdout );
   }
 
-  NxlinkLogSink::~NxlinkLogSink()
+  DoggoDevLogSink::~DoggoDevLogSink()
   {
     finalize();
   }
 
-  bool NxlinkLogSink::initialize() noexcept
+  bool DoggoDevLogSink::initialize() noexcept
   {
     if ( isConnected() )
     {
       return true;
     }
 
-    // hbloader fills this address only when the NRO was launched by nxlink.
+    // hbloader fills this address only when the NRO was launched by netloader.
     if ( __nxlink_host.s_addr == 0 )
     {
       return false;
@@ -55,27 +55,59 @@ namespace doggo::platform::nx
     }
     mIsSocketInitialized = true;
 
-    // Keep stdout bound to the on-device console. The logger explicitly fans
-    // each formatted record out to this socket and ConsoleLogSink instead.
-    for ( int attempt = 0; attempt < NxlinkConnectAttempts; ++attempt )
+    const int listener = socket( AF_INET, SOCK_STREAM, 0 );
+    if ( listener < 0 )
     {
-      mSocket = nxlinkConnectToHost( false, false );
-      if ( mSocket >= 0 )
-      {
-        return true;
-      }
-
-      if ( attempt + 1 < NxlinkConnectAttempts )
-      {
-        svcSleepThread( NxlinkRetryDelayNanoseconds );
-      }
+      finalize();
+      return false;
     }
 
-    finalize();
-    return false;
+    constexpr int isReusableAddress = 1;
+    if ( setsockopt( listener, SOL_SOCKET, SO_REUSEADDR, &isReusableAddress, sizeof( isReusableAddress ) ) != 0 )
+    {
+      close( listener );
+      finalize();
+      return false;
+    }
+
+    sockaddr_in address     = {};
+    address.sin_family      = AF_INET;
+    address.sin_addr.s_addr = htonl( INADDR_ANY );
+    address.sin_port        = htons( dev::RemoteLogPort );
+    if ( bind( listener, reinterpret_cast<const sockaddr *>( &address ), sizeof( address ) ) != 0 ||
+         listen( listener, 1 ) != 0 )
+    {
+      close( listener );
+      finalize();
+      return false;
+    }
+
+    // WSL can always initiate this connection to the Switch, while the
+    // traditional nxlink callback into a WSL NAT guest requires forwarding.
+    pollfd descriptor = {};
+    descriptor.fd     = listener;
+    descriptor.events = POLLIN;
+    if ( poll( &descriptor, 1, dev::RemoteLogAttachTimeoutMilliseconds ) <= 0 || ( descriptor.revents & POLLIN ) == 0 )
+    {
+      close( listener );
+      finalize();
+      return false;
+    }
+
+    const int connection = accept( listener, nullptr, nullptr );
+    close( listener );
+    mSocket = connection;
+    if ( !isConnected() )
+    {
+      finalize();
+      return false;
+    }
+
+    write( std::string_view{ dev::RemoteLogPreamble.data(), dev::RemoteLogPreamble.size() } );
+    return isConnected();
   }
 
-  void NxlinkLogSink::finalize() noexcept
+  void DoggoDevLogSink::finalize() noexcept
   {
     if ( mSocket >= 0 )
     {
@@ -90,12 +122,12 @@ namespace doggo::platform::nx
     }
   }
 
-  bool NxlinkLogSink::isConnected() const noexcept
+  bool DoggoDevLogSink::isConnected() const noexcept
   {
     return mSocket >= 0;
   }
 
-  void NxlinkLogSink::write( const std::string_view text ) noexcept
+  void DoggoDevLogSink::write( const std::string_view text ) noexcept
   {
     std::size_t sentSize = 0;
     while ( isConnected() && sentSize < text.size() )

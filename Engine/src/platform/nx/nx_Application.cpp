@@ -1,11 +1,11 @@
 #include "doggo/platform/nx/nx_Application.hpp"
 
-#include "doggo/log/Log.hpp"
+#include "doggo/log/log_Log.hpp"
 #include "doggo/platform/nx/nx_AppletLifecycle.hpp"
 #include "doggo/platform/nx/nx_Input.hpp"
+#include "doggo/platform/nx/nx_LogSinks.hpp"
 #include "doggo/platform/nx/nx_Memory.hpp"
 #include "doggo/platform/nx/nx_MonotonicClock.hpp"
-#include "nx_LogSinks.hpp"
 
 #include <switch.h>
 
@@ -289,32 +289,32 @@ namespace doggo::platform::nx
 
     const MonotonicClock::time_point startedAt = MonotonicClock::now();
 
-    log::Logger    logger;
-    ConsoleLogSink consoleSink;
-    NxlinkLogSink  nxlinkSink;
+    log::Logger     logger;
+    ConsoleLogSink  consoleSink;
+    DoggoDevLogSink doggoDevSink;
     if ( !logger.attach( consoleSink ) )
     {
       consoleExit( nullptr );
       return EXIT_FAILURE;
     }
 
-    const bool isNxlinkConnected = nxlinkSink.initialize() && logger.attach( nxlinkSink );
-    if ( isNxlinkConnected )
+    const bool isDoggoDevConnected = doggoDevSink.initialize() && logger.attach( doggoDevSink );
+    if ( isDoggoDevConnected )
     {
       writeLog( logger,
                 log::Level::Info,
                 "Logging",
-                "PC log stream connected through nxlink",
+                "PC log stream connected through DoggoDev",
                 MonotonicClock::now(),
                 startedAt );
     }
     else
     {
-      nxlinkSink.finalize();
+      doggoDevSink.finalize();
       writeLog( logger,
                 log::Level::Warning,
                 "Logging",
-                "PC log stream unavailable; launch with nxlink -s to attach it",
+                "PC log stream unavailable; deploy with DoggoDev to attach it",
                 MonotonicClock::now(),
                 startedAt );
     }
@@ -458,8 +458,8 @@ namespace doggo::platform::nx
     lifecycle.finalize();
     logger.flush();
     consoleUpdate( nullptr );
-    logger.detach( nxlinkSink );
-    nxlinkSink.finalize();
+    logger.detach( doggoDevSink );
+    doggoDevSink.finalize();
     logger.detach( consoleSink );
     consoleExit( nullptr );
     return exitCode;

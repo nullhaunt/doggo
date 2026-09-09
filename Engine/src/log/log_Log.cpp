@@ -1,4 +1,4 @@
-#include "doggo/log/Log.hpp"
+#include "doggo/log/log_Log.hpp"
 
 #include <algorithm>
 #include <array>
@@ -140,8 +140,8 @@ namespace doggo::log
     mNextRecord  = ( mNextRecord + 1 ) % mRecords.size();
     mRecordCount = std::min( mRecordCount + 1, mRecords.size() );
 
-    std::array<char, FormattedLineCapacity> formattedLine{};
-    const std::string_view                  text = formatRecord( record, formattedLine );
+    std::array<char, FormattedLineCapacity> formattedLine = {};
+    const std::string_view                  text          = formatRecord( record, formattedLine );
     for ( std::size_t index = 0; index < mSinkCount; ++index )
     {
       mSinks[ index ]->write( text );

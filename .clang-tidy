@@ -1,0 +1,85 @@
+---
+Checks: '-*,
+abseil-*,
+bugprone-*,
+-bugprone-unchecked-optional-access,
+-bugprone-easily-swappable-parameters,
+clang-analyzer-*,
+-clang-analyzer-apiModeling.Errno,
+cppcoreguidelines-slicing,
+cppcoreguidelines-interfaces-global-init,
+cppcoreguidelines-narrowing-conversions,
+google-default-arguments,
+google-runtime-operator,
+google-explicit-constructor,
+hicpp-multiway-paths-covered,
+hicpp-exception-baseclass,
+llvm-else-after-return,
+llvm-qualified-auto,
+misc-*,
+-misc-unused-parameters,
+-misc-no-recursion,
+-misc-non-private-member-variables-in-classes,
+-misc-const-correctness,
+modernize-*,
+-modernize-use-nodiscard,
+-modernize-loop-convert,
+-modernize-use-trailing-return-type,
+-modernize-avoid-c-arrays,
+performance-*,
+-performance-enum-size,
+-performance-no-int-to-ptr,
+-performance-unnecessary-copy-initialization,
+readability-*,
+-readability-braces-around-statements,
+-readability-use-anyofallof,
+-readability-identifier-length,
+-readability-magic-numbers,
+-readability-qualified-auto,
+-readability-uppercase-literal-suffix,
+-readability-function-cognitive-complexity,
+-readability-implicit-bool-conversion,
+-readability-make-member-function-const,
+-readability-convert-member-functions-to-static'
+CheckOptions:
+  # Type names
+  - key: readability-identifier-naming.ClassCase
+    value: CamelCase
+  - key: readability-identifier-naming.StructCase
+    value: CamelCase
+  - key: readability-identifier-naming.UnionCase
+    value: CamelCase
+  - key: readability-identifier-naming.EnumCase
+    value: CamelCase
+  - key: readability-identifier-naming.ClassIgnoredRegexp
+    value: ^hk(.*)
+  - key: readability-identifier-naming.StructIgnoredRegexp
+    value: ^hk(.*)
+  - key: readability-identifier-naming.UnionIgnoredRegexp
+    value: ^hk(.*)
+  - key: readability-identifier-naming.EnumIgnoredRegexp
+    value: ^hk(.*)
+
+  # Class/struct members (clang-tidy does not distinguish classes from structs)
+  - key: readability-identifier-naming.MemberCase
+    value: CamelCase
+  - key: readability-identifier-naming.MemberPrefix
+    value: m
+
+  # Public class/struct members
+  - key: readability-identifier-naming.PublicMemberCase
+    value: lower_case
+  - key: readability-identifier-naming.PublicMemberPrefix
+    value: ''
+  - key: readability-identifier-naming.PublicMemberIgnoredRegexp
+    # clang-tidy does not distinguish classes from structs, so we allow names like mMemberNames
+    # for public members as well (even for structs).
+    value: (^_(.*)|^m[A-Z](.*))
+
+  # Identifier names
+  - key: readability-identifier-naming.MacroDefinitionCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.ScopedEnumConstantCase
+    value: CamelCase
+  - key: readability-identifier-naming.ScopedEnumConstantIgnoredRegexp
+    value: ^_(.*)

@@ -1,0 +1,75 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 28,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{DEVKITPRO}/cmake/Switch.cmake"
+      }
+    },
+    {
+      "name": "doggo-debug",
+      "displayName": "DOGGO Debug",
+      "description": "Configure the complete Nintendo Switch workspace in Debug mode.",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "doggo-release",
+      "displayName": "DOGGO Release",
+      "description": "Configure the complete Nintendo Switch workspace in Release mode.",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "engine-debug",
+      "displayName": "Engine only (Debug)",
+      "configurePreset": "doggo-debug",
+      "targets": "doggo_platform_nx"
+    },
+    {
+      "name": "engine-release",
+      "displayName": "Engine only (Release)",
+      "configurePreset": "doggo-release",
+      "targets": "doggo_platform_nx"
+    },
+    {
+      "name": "game-debug",
+      "displayName": "Game + dependencies (Debug)",
+      "configurePreset": "doggo-debug",
+      "targets": "game_nro"
+    },
+    {
+      "name": "game-release",
+      "displayName": "Game + dependencies (Release)",
+      "configurePreset": "doggo-release",
+      "targets": "game_nro"
+    },
+    {
+      "name": "all-debug",
+      "displayName": "Everything (Debug)",
+      "configurePreset": "doggo-debug",
+      "targets": "doggo_all"
+    },
+    {
+      "name": "all-release",
+      "displayName": "Everything (Release)",
+      "configurePreset": "doggo-release",
+      "targets": "doggo_all"
+    }
+  ]
+}

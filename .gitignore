@@ -1,0 +1,21 @@
+# CMake / CLion
+build/
+.idea/
+
+# Generated compilation database
+compile_commands.json
+
+# Switch build products
+*.elf
+*.nro
+*.nacp
+*.map
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Developer-local CMake presets
+CMakeUserPresets.json

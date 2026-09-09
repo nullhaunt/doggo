@@ -144,7 +144,7 @@ namespace doggo::platform::nx
 
     if ( R_FAILED( lifecycleResult ) )
     {
-      std::cout << "Lifecycle hook initialization failed: ";
+      std::cout << std::format( "Lifecycle hook initialization failed: " );
       printResult( lifecycleResult );
       std::cout << "\n\n";
       exitCode = EXIT_FAILURE;
@@ -169,6 +169,7 @@ namespace doggo::platform::nx
 
     MonotonicClock::time_point previousTime = startedAt;
     bool                       isRunning    = true;
+    AppletFocusState           focusState   = AppletFocusState_InFocus;
 
     while ( isRunning )
     {
@@ -177,6 +178,11 @@ namespace doggo::platform::nx
       AppletLifecycleEvent lifecycleEvent;
       while ( lifecycle.tryPopEvent( lifecycleEvent ) )
       {
+        if ( lifecycleEvent.type == AppletLifecycleEventType::FocusStateChanged )
+        {
+          focusState = static_cast<AppletFocusState>( lifecycleEvent.detail );
+        }
+
         printLifecycleEvent( lifecycleEvent, startedAt );
       }
 
@@ -194,13 +200,31 @@ namespace doggo::platform::nx
         break;
       }
 
+      if ( focusState != AppletFocusState_InFocus )
+      {
+        // NoSuspend keeps the process alive so it can observe the transition.
+        // Block foreground work until the next lifecycle message instead of
+        // spinning behind HOME or a foreground library applet.
+        const Result waitResult = eventWait( appletGetMessageEvent(), std::numeric_limits<std::uint64_t>::max() );
+        if ( R_FAILED( waitResult ) )
+        {
+          std::cout << "Lifecycle wait failed: ";
+          printResult( waitResult );
+          std::cout << '\n';
+          exitCode = EXIT_FAILURE;
+          break;
+        }
+
+        continue;
+      }
+
       padUpdate( &pad );
 
       const u64 buttonsDown = padGetButtonsDown( &pad );
 
       if ( ( buttonsDown & HidNpadButton_Plus ) != 0 )
       {
-        std::cout << std::format( "[+{:.3f} ms Exit requested by controller\n",
+        std::cout << std::format( "[+{:.3f} ms] Exit requested by controller\n",
                                   std::chrono::duration<double, std::milli>{ currentTime - startedAt }.count() );
         break;
       }

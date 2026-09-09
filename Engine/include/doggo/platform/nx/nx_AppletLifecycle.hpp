@@ -50,6 +50,7 @@ namespace doggo::platform::nx
       static void handleAppletHook( AppletHookType hook, void * context );
 
       void recordCurrentState() noexcept;
+      void recordFocusState( AppletFocusState state ) noexcept;
       void recordEvent( AppletLifecycleEventType type, std::int32_t detail = 0 ) noexcept;
 
       AppletHookCookie                                mHookCookie        = {};
@@ -58,6 +59,7 @@ namespace doggo::platform::nx
       std::size_t                                     mWriteIndex        = 0;
       std::size_t                                     mEventCount        = 0;
       std::uint32_t                                   mDroppedEventCount = 0;
-      bool                                            mInitialized       = false;
+      std::int32_t                                    mFocusState        = 0;
+      bool                                            mIsInitialized     = false;
   };
 }  // namespace doggo::platform::nx

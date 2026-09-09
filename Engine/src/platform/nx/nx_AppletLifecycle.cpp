@@ -9,12 +9,15 @@ namespace doggo::platform::nx
 
   std::uint32_t AppletLifecycle::initialize() noexcept
   {
-    if ( mInitialized )
+    if ( mIsInitialized )
     {
       return 0;
     }
 
-    const Result result = appletSetFocusHandlingMode( AppletFocusHandlingMode_SuspendHomeSleepNotify );
+    // A regular application reports Background only when it remains runnable.
+    // Application::run pauses foreground work and waits on the applet message
+    // event while focus is elsewhere.
+    const Result result = appletSetFocusHandlingMode( AppletFocusHandlingMode_NoSuspend );
     if ( R_FAILED( result ) )
     {
       return result;
@@ -24,9 +27,10 @@ namespace doggo::platform::nx
     mWriteIndex        = 0;
     mEventCount        = 0;
     mDroppedEventCount = 0;
+    mFocusState        = 0;
 
     appletHook( &mHookCookie, handleAppletHook, this );
-    mInitialized = true;
+    mIsInitialized = true;
     recordCurrentState();
 
     return 0;
@@ -34,13 +38,13 @@ namespace doggo::platform::nx
 
   void AppletLifecycle::finalize() noexcept
   {
-    if ( !mInitialized )
+    if ( !mIsInitialized )
     {
       return;
     }
 
     appletUnhook( &mHookCookie );
-    mInitialized = false;
+    mIsInitialized = false;
   }
 
   bool AppletLifecycle::tryPopEvent( AppletLifecycleEvent & event ) noexcept
@@ -68,8 +72,7 @@ namespace doggo::platform::nx
     switch ( hook )
     {
       case AppletHookType_OnFocusState:
-        lifecycle.recordEvent( AppletLifecycleEventType::FocusStateChanged,
-                               static_cast<std::int32_t>( appletGetFocusState() ) );
+        lifecycle.recordFocusState( appletGetFocusState() );
         break;
 
       case AppletHookType_OnOperationMode:
@@ -96,10 +99,22 @@ namespace doggo::platform::nx
 
   void AppletLifecycle::recordCurrentState() noexcept
   {
-    recordEvent( AppletLifecycleEventType::FocusStateChanged, static_cast<std::int32_t>( appletGetFocusState() ) );
+    recordFocusState( appletGetFocusState() );
     recordEvent( AppletLifecycleEventType::OperationModeChanged,
                  static_cast<std::int32_t>( appletGetOperationMode() ) );
     recordEvent( AppletLifecycleEventType::PerformanceModeChanged, appletGetPerformanceMode() );
+  }
+
+  void AppletLifecycle::recordFocusState( const AppletFocusState state ) noexcept
+  {
+    const auto detail = static_cast<std::int32_t>( state );
+    if ( detail == mFocusState )
+    {
+      return;
+    }
+
+    mFocusState = detail;
+    recordEvent( AppletLifecycleEventType::FocusStateChanged, detail );
   }
 
   void AppletLifecycle::recordEvent( const AppletLifecycleEventType type, const std::int32_t detail ) noexcept

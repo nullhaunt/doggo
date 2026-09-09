@@ -2,6 +2,7 @@ add_library(doggo_platform_nx STATIC
         nx_AppletLifecycle.cpp
         nx_Application.cpp
         nx_Input.cpp
+        nx_LogSinks.cpp
         nx_Memory.cpp
         nx_MonotonicClock.cpp
 )
@@ -20,5 +21,6 @@ target_compile_features(doggo_platform_nx
 
 target_link_libraries(doggo_platform_nx
         PRIVATE
+        doggo::log
         nx
 )

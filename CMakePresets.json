@@ -51,13 +51,13 @@
       "name": "game-debug",
       "displayName": "Game + dependencies (Debug)",
       "configurePreset": "doggo-debug",
-      "targets": "game_nro"
+      "targets": "doggo_game_nro"
     },
     {
       "name": "game-release",
       "displayName": "Game + dependencies (Release)",
       "configurePreset": "doggo-release",
-      "targets": "game_nro"
+      "targets": "doggo_game_nro"
     },
     {
       "name": "all-debug",

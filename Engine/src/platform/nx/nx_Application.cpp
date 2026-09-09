@@ -1,17 +1,20 @@
 #include "doggo/platform/nx/nx_Application.hpp"
 
+#include "doggo/log/Log.hpp"
 #include "doggo/platform/nx/nx_AppletLifecycle.hpp"
 #include "doggo/platform/nx/nx_Input.hpp"
 #include "doggo/platform/nx/nx_Memory.hpp"
 #include "doggo/platform/nx/nx_MonotonicClock.hpp"
+#include "nx_LogSinks.hpp"
 
 #include <switch.h>
 
 #include <chrono>
 #include <cstdlib>
 #include <format>
-#include <iostream>
 #include <limits>
+#include <string>
+#include <string_view>
 
 namespace
 {
@@ -38,6 +41,23 @@ namespace
       std::uint32_t attributes          = 0;
   };
 
+  [[nodiscard]] std::chrono::nanoseconds
+  elapsedSince( const doggo::platform::nx::MonotonicClock::time_point timestamp,
+                const doggo::platform::nx::MonotonicClock::time_point startedAt ) noexcept
+  {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>( timestamp - startedAt );
+  }
+
+  void writeLog( doggo::log::Logger &                                  logger,
+                 const doggo::log::Level                               level,
+                 const std::string_view                                category,
+                 const std::string_view                                message,
+                 const doggo::platform::nx::MonotonicClock::time_point timestamp,
+                 const doggo::platform::nx::MonotonicClock::time_point startedAt ) noexcept
+  {
+    logger.write( level, category, message, elapsedSince( timestamp, startedAt ) );
+  }
+
   [[nodiscard]] bool isStickLive( const doggo::platform::nx::AnalogStickPosition & stick ) noexcept
   {
     return stick.x < -StickDirectionThreshold ||
@@ -46,28 +66,26 @@ namespace
            stick.y > StickDirectionThreshold;
   }
 
-  void printTimestamp( const doggo::platform::nx::MonotonicClock::time_point timestamp,
+  void logStickChange( doggo::log::Logger &                                  logger,
+                       const char * const                                    stickName,
+                       const doggo::platform::nx::AnalogStickPosition &      position,
+                       const bool                                            isLive,
+                       const doggo::platform::nx::MonotonicClock::time_point timestamp,
                        const doggo::platform::nx::MonotonicClock::time_point startedAt )
   {
-    const auto elapsed = std::chrono::duration<double, std::milli>{ timestamp - startedAt }.count();
-    std::cout << std::format( "[+{:.3f} ms] ", elapsed );
+    writeLog( logger,
+              doggo::log::Level::Info,
+              "Input",
+              std::format( "{} stick {} ({}, {})", stickName, isLive ? "active" : "centered", position.x, position.y ),
+              timestamp,
+              startedAt );
   }
 
-  void printStickChange( const char * const                                    stickName,
-                         const doggo::platform::nx::AnalogStickPosition &      position,
-                         const bool                                            isLive,
-                         const doggo::platform::nx::MonotonicClock::time_point timestamp,
-                         const doggo::platform::nx::MonotonicClock::time_point startedAt )
-  {
-    printTimestamp( timestamp, startedAt );
-    std::cout << std::format( "Input: {} stick {} ({}, {})\n", stickName, isLive ? "active" : "centered", position.x,
-                              position.y );
-  }
-
-  void printInputChanges( const doggo::platform::nx::InputSnapshot &            input,
-                          InputTelemetryState &                                 previous,
-                          const doggo::platform::nx::MonotonicClock::time_point timestamp,
-                          const doggo::platform::nx::MonotonicClock::time_point startedAt )
+  void logInputChanges( doggo::log::Logger &                                  logger,
+                        const doggo::platform::nx::InputSnapshot &            input,
+                        InputTelemetryState &                                 previous,
+                        const doggo::platform::nx::MonotonicClock::time_point timestamp,
+                        const doggo::platform::nx::MonotonicClock::time_point startedAt )
   {
     const bool isSourceChanged = !previous.has_sample ||
                                  input.is_connected != previous.is_connected ||
@@ -77,20 +95,24 @@ namespace
 
     if ( isSourceChanged )
     {
-      printTimestamp( timestamp, startedAt );
       if ( input.is_connected )
       {
         const bool         wasConnected = previous.has_sample && previous.is_connected;
         const char * const source       = input.is_handheld ? "Handheld" : "External";
-        std::cout << std::format( "Input: Controller {} ({}, style 0x{:08X}, attributes 0x{:08X})\n",
-                                  wasConnected ? "configuration changed" : "connected",
-                                  source,
-                                  input.style_set,
-                                  input.attributes );
+        writeLog( logger,
+                  doggo::log::Level::Info,
+                  "Input",
+                  std::format( "Controller {} ({}, style 0x{:08X}, attributes 0x{:08X})",
+                               wasConnected ? "configuration changed" : "connected",
+                               source,
+                               input.style_set,
+                               input.attributes ),
+                  timestamp,
+                  startedAt );
       }
       else
       {
-        std::cout << "Input: Controller disconnected\n";
+        writeLog( logger, doggo::log::Level::Warning, "Input", "Controller disconnected", timestamp, startedAt );
       }
 
       previous.is_left_stick_live  = false;
@@ -102,11 +124,12 @@ namespace
     const std::uint64_t buttonsUp   = input.buttons_up & ~StickPseudoButtonMask;
     if ( buttonsDown != 0 || buttonsUp != 0 )
     {
-      printTimestamp( timestamp, startedAt );
-      std::cout << std::format( "Input: Buttons held 0x{:09X}, down 0x{:09X}, up 0x{:09X}\n",
-                                buttonsHeld,
-                                buttonsDown,
-                                buttonsUp );
+      writeLog( logger,
+                doggo::log::Level::Info,
+                "Input",
+                std::format( "Buttons held 0x{:09X}, down 0x{:09X}, up 0x{:09X}", buttonsHeld, buttonsDown, buttonsUp ),
+                timestamp,
+                startedAt );
     }
 
     if ( input.is_connected )
@@ -114,13 +137,13 @@ namespace
       const bool isLeftStickLive = isStickLive( input.left_stick );
       if ( isLeftStickLive != previous.is_left_stick_live )
       {
-        printStickChange( "Left", input.left_stick, isLeftStickLive, timestamp, startedAt );
+        logStickChange( logger, "Left", input.left_stick, isLeftStickLive, timestamp, startedAt );
       }
 
       const bool isRightStickLive = isStickLive( input.right_stick );
       if ( isRightStickLive != previous.is_right_stick_live )
       {
-        printStickChange( "Right", input.right_stick, isRightStickLive, timestamp, startedAt );
+        logStickChange( logger, "Right", input.right_stick, isRightStickLive, timestamp, startedAt );
       }
 
       previous.is_left_stick_live  = isLeftStickLive;
@@ -182,54 +205,76 @@ namespace
     }
   }
 
-  void printMemoryReport( const doggo::platform::nx::MemoryReport & report )
+  void logMemoryReport( doggo::log::Logger &                                  logger,
+                        const doggo::platform::nx::MemoryReport &             report,
+                        const doggo::platform::nx::MonotonicClock::time_point timestamp,
+                        const doggo::platform::nx::MonotonicClock::time_point startedAt )
   {
-    std::cout << "Memory\n";
-    std::cout << std::format( "\tProcess total : {:>7.2f}\tMiB\n",
-                              static_cast<double>( report.process_total_bytes ) / BytesPerMebibyte );
-    std::cout << std::format( "\tProcess used  : {:>7.2f}\tMiB\n",
-                              static_cast<double>( report.process_used_bytes ) / BytesPerMebibyte );
-    std::cout << std::format( "\tProcess free  : {:>7.2f}\tMiB\n",
-                              static_cast<double>( report.process_free_bytes ) / BytesPerMebibyte );
-    std::cout << std::format( "\tHeap region   : {:>7.2f}\tMiB\n\n",
-                              static_cast<double>( report.heap_region_bytes ) / BytesPerMebibyte );
+    writeLog( logger,
+              doggo::log::Level::Info,
+              "Memory",
+              std::format( "Process total: {:.2f} MiB",
+                           static_cast<double>( report.process_total_bytes ) / BytesPerMebibyte ),
+              timestamp,
+              startedAt );
+    writeLog(
+        logger,
+        doggo::log::Level::Info,
+        "Memory",
+        std::format( "Process used: {:.2f} MiB", static_cast<double>( report.process_used_bytes ) / BytesPerMebibyte ),
+        timestamp,
+        startedAt );
+    writeLog(
+        logger,
+        doggo::log::Level::Info,
+        "Memory",
+        std::format( "Process free: {:.2f} MiB", static_cast<double>( report.process_free_bytes ) / BytesPerMebibyte ),
+        timestamp,
+        startedAt );
+    writeLog(
+        logger,
+        doggo::log::Level::Info,
+        "Memory",
+        std::format( "Heap region: {:.2f} MiB", static_cast<double>( report.heap_region_bytes ) / BytesPerMebibyte ),
+        timestamp,
+        startedAt );
   }
 
-  void printResult( const std::uint32_t result )
+  [[nodiscard]] std::string formatResult( const std::uint32_t result )
   {
-    std::cout << std::format( "0x{:08X}", result );
+    return std::format( "0x{:08X}", result );
   }
 
-  void printLifecycleEvent( const doggo::platform::nx::AppletLifecycleEvent &     event,
-                            const doggo::platform::nx::MonotonicClock::time_point startedAt )
+  void logLifecycleEvent( doggo::log::Logger &                                  logger,
+                          const doggo::platform::nx::AppletLifecycleEvent &     event,
+                          const doggo::platform::nx::MonotonicClock::time_point startedAt )
   {
-    printTimestamp( event.timestamp, startedAt );
-
     using EventType = doggo::platform::nx::AppletLifecycleEventType;
+    std::string message;
     switch ( event.type )
     {
       case EventType::FocusStateChanged:
-        std::cout << std::format( "Focus: {}", getFocusStateName( event.detail ) );
+        message = std::format( "Focus: {}", getFocusStateName( event.detail ) );
         break;
 
       case EventType::OperationModeChanged:
-        std::cout << std::format( "Operation mode: {}", getOperationModeName( event.detail ) );
+        message = std::format( "Operation mode: {}", getOperationModeName( event.detail ) );
         break;
 
       case EventType::PerformanceModeChanged:
-        std::cout << std::format( "Performance mode: {}", getPerformanceModeName( event.detail ) );
+        message = std::format( "Performance mode: {}", getPerformanceModeName( event.detail ) );
         break;
 
       case EventType::ExitRequested:
-        std::cout << "Exit requested by applet service";
+        message = "Exit requested by applet service";
         break;
 
       case EventType::Resumed:
-        std::cout << "Application resumed";
+        message = "Application resumed";
         break;
     }
 
-    std::cout << '\n';
+    writeLog( logger, doggo::log::Level::Info, "Lifecycle", message, event.timestamp, startedAt );
   }
 }  // namespace
 
@@ -239,10 +284,40 @@ namespace doggo::platform::nx
   {
     if ( !consoleInit( nullptr ) )
     {
-      return 1;
+      return EXIT_FAILURE;
     }
 
     const MonotonicClock::time_point startedAt = MonotonicClock::now();
+
+    log::Logger    logger;
+    ConsoleLogSink consoleSink;
+    NxlinkLogSink  nxlinkSink;
+    if ( !logger.attach( consoleSink ) )
+    {
+      consoleExit( nullptr );
+      return EXIT_FAILURE;
+    }
+
+    const bool isNxlinkConnected = nxlinkSink.initialize() && logger.attach( nxlinkSink );
+    if ( isNxlinkConnected )
+    {
+      writeLog( logger,
+                log::Level::Info,
+                "Logging",
+                "PC log stream connected through nxlink",
+                MonotonicClock::now(),
+                startedAt );
+    }
+    else
+    {
+      nxlinkSink.finalize();
+      writeLog( logger,
+                log::Level::Warning,
+                "Logging",
+                "PC log stream unavailable; launch with nxlink -s to attach it",
+                MonotonicClock::now(),
+                startedAt );
+    }
 
     AppletLifecycle     lifecycle;
     const std::uint32_t lifecycleResult = lifecycle.initialize();
@@ -250,18 +325,24 @@ namespace doggo::platform::nx
     Input input;
     input.initialize();
 
-    std::cout << "DOGGO Gate 0 - Platform Proof\n";
-    std::cout << "=============================\n\n";
-    std::cout << "Timing\n";
-    std::cout << std::format( "\tCounter frequency: {} Hz\n\n", MonotonicClock::frequency() );
+    writeLog( logger, log::Level::Info, "Startup", "DOGGO Gate 0 - Platform Proof", startedAt, startedAt );
+    writeLog( logger,
+              log::Level::Info,
+              "Timing",
+              std::format( "Counter frequency: {} Hz", MonotonicClock::frequency() ),
+              MonotonicClock::now(),
+              startedAt );
 
     int exitCode = EXIT_SUCCESS;
 
     if ( R_FAILED( lifecycleResult ) )
     {
-      std::cout << std::format( "Lifecycle hook initialization failed: " );
-      printResult( lifecycleResult );
-      std::cout << "\n\n";
+      writeLog( logger,
+                log::Level::Error,
+                "Lifecycle",
+                std::format( "Hook initialization failed: {}", formatResult( lifecycleResult ) ),
+                MonotonicClock::now(),
+                startedAt );
       exitCode = EXIT_FAILURE;
     }
 
@@ -269,20 +350,25 @@ namespace doggo::platform::nx
     const std::uint32_t memoryResult = queryMemoryReport( memoryReport );
     if ( R_SUCCEEDED( memoryResult ) )
     {
-      printMemoryReport( memoryReport );
+      logMemoryReport( logger, memoryReport, MonotonicClock::now(), startedAt );
     }
     else
     {
-      std::cout << "Memory query failed: ";
-      printResult( memoryResult );
-      std::cout << "\n\n";
+      writeLog( logger,
+                log::Level::Error,
+                "Memory",
+                std::format( "Query failed: {}", formatResult( memoryResult ) ),
+                MonotonicClock::now(),
+                startedAt );
       exitCode = EXIT_FAILURE;
     }
 
-    std::cout << "Input\n";
-    std::cout << "\tExercise connection, buttons, and both sticks.\n\n";
-    std::cout << "Press (+) to exit.\n\n";
-    std::cout << "Events\n";
+    writeLog( logger,
+              log::Level::Info,
+              "Input",
+              "Exercise connection, buttons, and both sticks; press (+) to exit",
+              MonotonicClock::now(),
+              startedAt );
 
     MonotonicClock::time_point previousTime = startedAt;
     bool                       isRunning    = true;
@@ -301,13 +387,13 @@ namespace doggo::platform::nx
           focusState = static_cast<AppletFocusState>( lifecycleEvent.detail );
         }
 
-        printLifecycleEvent( lifecycleEvent, startedAt );
+        logLifecycleEvent( logger, lifecycleEvent, startedAt );
       }
 
       const MonotonicClock::time_point currentTime = MonotonicClock::now();
       if ( currentTime < previousTime )
       {
-        std::cout << "ERROR: monotonic clock moved backwards.\n";
+        writeLog( logger, log::Level::Error, "Timing", "Monotonic clock moved backwards", currentTime, startedAt );
         exitCode = EXIT_FAILURE;
         break;
       }
@@ -326,9 +412,12 @@ namespace doggo::platform::nx
         const Result waitResult = eventWait( appletGetMessageEvent(), std::numeric_limits<std::uint64_t>::max() );
         if ( R_FAILED( waitResult ) )
         {
-          std::cout << "Lifecycle wait failed: ";
-          printResult( waitResult );
-          std::cout << '\n';
+          writeLog( logger,
+                    log::Level::Error,
+                    "Lifecycle",
+                    std::format( "Wait failed: {}", formatResult( waitResult ) ),
+                    currentTime,
+                    startedAt );
           exitCode = EXIT_FAILURE;
           break;
         }
@@ -337,12 +426,11 @@ namespace doggo::platform::nx
       }
 
       const InputSnapshot & inputSnapshot = input.update();
-      printInputChanges( inputSnapshot, inputTelemetry, currentTime, startedAt );
+      logInputChanges( logger, inputSnapshot, inputTelemetry, currentTime, startedAt );
 
       if ( ( inputSnapshot.buttons_down & HidNpadButton_Plus ) != 0 )
       {
-        printTimestamp( currentTime, startedAt );
-        std::cout << "Exit requested by controller\n";
+        writeLog( logger, log::Level::Info, "Input", "Exit requested by controller", currentTime, startedAt );
         break;
       }
 
@@ -351,12 +439,28 @@ namespace doggo::platform::nx
 
     if ( lifecycle.droppedEventCount() != 0 )
     {
-      std::cout << std::format( "WARNING: dropped {} lifecycle events.\n", lifecycle.droppedEventCount() );
+      writeLog( logger,
+                log::Level::Warning,
+                "Lifecycle",
+                std::format( "Dropped {} lifecycle events", lifecycle.droppedEventCount() ),
+                MonotonicClock::now(),
+                startedAt );
       exitCode = EXIT_FAILURE;
     }
 
-    consoleUpdate( nullptr );
+    writeLog( logger,
+              log::Level::Info,
+              "Shutdown",
+              std::format( "Application exiting with code {}", exitCode ),
+              MonotonicClock::now(),
+              startedAt );
+
     lifecycle.finalize();
+    logger.flush();
+    consoleUpdate( nullptr );
+    logger.detach( nxlinkSink );
+    nxlinkSink.finalize();
+    logger.detach( consoleSink );
     consoleExit( nullptr );
     return exitCode;
   }

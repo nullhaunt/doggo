@@ -1,0 +1,47 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 28,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}"
+    },
+    {
+      "name": "doggodev-release",
+      "displayName": "DoggoDev Release",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "doggodev-debug",
+      "displayName": "DoggoDev Debug",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "doggodev-debug",
+      "displayName": "DoggoDev (Debug)",
+      "configurePreset": "doggodev-debug",
+      "targets": "doggo-dev"
+    },
+    {
+      "name": "doggodev-release",
+      "displayName": "DoggoDev (Release)",
+      "configurePreset": "doggodev-release",
+      "targets": "doggo-dev"
+    }
+  ]
+}
+

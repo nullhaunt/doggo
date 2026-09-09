@@ -1,6 +1,7 @@
 #include "doggo/platform/nx/nx_Application.hpp"
 
 #include "doggo/platform/nx/nx_AppletLifecycle.hpp"
+#include "doggo/platform/nx/nx_Input.hpp"
 #include "doggo/platform/nx/nx_Memory.hpp"
 #include "doggo/platform/nx/nx_MonotonicClock.hpp"
 
@@ -10,10 +11,128 @@
 #include <cstdlib>
 #include <format>
 #include <iostream>
+#include <limits>
 
 namespace
 {
-  constexpr double BytesPerMebibyte = 1024.0 * 1024.0;
+  constexpr double       BytesPerMebibyte        = 1024.0 * 1024.0;
+  constexpr std::int32_t StickDirectionThreshold = JOYSTICK_MAX / 4;
+
+  constexpr std::uint64_t StickPseudoButtonMask = HidNpadButton_StickLLeft |
+                                                  HidNpadButton_StickLUp |
+                                                  HidNpadButton_StickLRight |
+                                                  HidNpadButton_StickLDown |
+                                                  HidNpadButton_StickRLeft |
+                                                  HidNpadButton_StickRUp |
+                                                  HidNpadButton_StickRRight |
+                                                  HidNpadButton_StickRDown;
+
+  struct InputTelemetryState final
+  {
+      bool          has_sample          = false;
+      bool          is_connected        = false;
+      bool          is_handheld         = false;
+      bool          is_left_stick_live  = false;
+      bool          is_right_stick_live = false;
+      std::uint32_t style_set           = 0;
+      std::uint32_t attributes          = 0;
+  };
+
+  [[nodiscard]] bool isStickLive( const doggo::platform::nx::AnalogStickPosition & stick ) noexcept
+  {
+    return stick.x < -StickDirectionThreshold ||
+           stick.x > StickDirectionThreshold ||
+           stick.y < -StickDirectionThreshold ||
+           stick.y > StickDirectionThreshold;
+  }
+
+  void printTimestamp( const doggo::platform::nx::MonotonicClock::time_point timestamp,
+                       const doggo::platform::nx::MonotonicClock::time_point startedAt )
+  {
+    const auto elapsed = std::chrono::duration<double, std::milli>{ timestamp - startedAt }.count();
+    std::cout << std::format( "[+{:.3f} ms] ", elapsed );
+  }
+
+  void printStickChange( const char * const                                    stickName,
+                         const doggo::platform::nx::AnalogStickPosition &      position,
+                         const bool                                            isLive,
+                         const doggo::platform::nx::MonotonicClock::time_point timestamp,
+                         const doggo::platform::nx::MonotonicClock::time_point startedAt )
+  {
+    printTimestamp( timestamp, startedAt );
+    std::cout << std::format( "Input: {} stick {} ({}, {})\n", stickName, isLive ? "active" : "centered", position.x,
+                              position.y );
+  }
+
+  void printInputChanges( const doggo::platform::nx::InputSnapshot &            input,
+                          InputTelemetryState &                                 previous,
+                          const doggo::platform::nx::MonotonicClock::time_point timestamp,
+                          const doggo::platform::nx::MonotonicClock::time_point startedAt )
+  {
+    const bool isSourceChanged = !previous.has_sample ||
+                                 input.is_connected != previous.is_connected ||
+                                 input.is_handheld != previous.is_handheld ||
+                                 input.style_set != previous.style_set ||
+                                 input.attributes != previous.attributes;
+
+    if ( isSourceChanged )
+    {
+      printTimestamp( timestamp, startedAt );
+      if ( input.is_connected )
+      {
+        const bool         wasConnected = previous.has_sample && previous.is_connected;
+        const char * const source       = input.is_handheld ? "Handheld" : "External";
+        std::cout << std::format( "Input: Controller {} ({}, style 0x{:08X}, attributes 0x{:08X})\n",
+                                  wasConnected ? "configuration changed" : "connected",
+                                  source,
+                                  input.style_set,
+                                  input.attributes );
+      }
+      else
+      {
+        std::cout << "Input: Controller disconnected\n";
+      }
+
+      previous.is_left_stick_live  = false;
+      previous.is_right_stick_live = false;
+    }
+
+    const std::uint64_t buttonsHeld = input.buttons_held & ~StickPseudoButtonMask;
+    const std::uint64_t buttonsDown = input.buttons_down & ~StickPseudoButtonMask;
+    const std::uint64_t buttonsUp   = input.buttons_up & ~StickPseudoButtonMask;
+    if ( buttonsDown != 0 || buttonsUp != 0 )
+    {
+      printTimestamp( timestamp, startedAt );
+      std::cout << std::format( "Input: Buttons held 0x{:09X}, down 0x{:09X}, up 0x{:09X}\n",
+                                buttonsHeld,
+                                buttonsDown,
+                                buttonsUp );
+    }
+
+    if ( input.is_connected )
+    {
+      const bool isLeftStickLive = isStickLive( input.left_stick );
+      if ( isLeftStickLive != previous.is_left_stick_live )
+      {
+        printStickChange( "Left", input.left_stick, isLeftStickLive, timestamp, startedAt );
+      }
+
+      const bool isRightStickLive = isStickLive( input.right_stick );
+      if ( isRightStickLive != previous.is_right_stick_live )
+      {
+        printStickChange( "Right", input.right_stick, isRightStickLive, timestamp, startedAt );
+      }
+
+      previous.is_left_stick_live  = isLeftStickLive;
+      previous.is_right_stick_live = isRightStickLive;
+    }
+
+    previous.has_sample   = true;
+    previous.is_connected = input.is_connected;
+    previous.is_handheld  = input.is_handheld;
+    previous.style_set    = input.style_set;
+    previous.attributes   = input.attributes;
+  }
 
   [[nodiscard]] const char * getFocusStateName( const std::int32_t state ) noexcept
   {
@@ -84,9 +203,7 @@ namespace
   void printLifecycleEvent( const doggo::platform::nx::AppletLifecycleEvent &     event,
                             const doggo::platform::nx::MonotonicClock::time_point startedAt )
   {
-    const auto elapsed = std::chrono::duration<double, std::milli>{ event.timestamp - startedAt }.count();
-
-    std::cout << std::format( "[+{:.3f} ms] ", elapsed );
+    printTimestamp( event.timestamp, startedAt );
 
     using EventType = doggo::platform::nx::AppletLifecycleEventType;
     switch ( event.type )
@@ -130,10 +247,8 @@ namespace doggo::platform::nx
     AppletLifecycle     lifecycle;
     const std::uint32_t lifecycleResult = lifecycle.initialize();
 
-    padConfigureInput( 1, HidNpadStyleSet_NpadStandard );
-
-    PadState pad = {};
-    padInitializeDefault( &pad );
+    Input input;
+    input.initialize();
 
     std::cout << "DOGGO Gate 0 - Platform Proof\n";
     std::cout << "=============================\n\n";
@@ -164,12 +279,15 @@ namespace doggo::platform::nx
       exitCode = EXIT_FAILURE;
     }
 
+    std::cout << "Input\n";
+    std::cout << "\tExercise connection, buttons, and both sticks.\n\n";
     std::cout << "Press (+) to exit.\n\n";
-    std::cout << "Lifecycle\n";
+    std::cout << "Events\n";
 
     MonotonicClock::time_point previousTime = startedAt;
     bool                       isRunning    = true;
     AppletFocusState           focusState   = AppletFocusState_InFocus;
+    InputTelemetryState        inputTelemetry;
 
     while ( isRunning )
     {
@@ -218,14 +336,13 @@ namespace doggo::platform::nx
         continue;
       }
 
-      padUpdate( &pad );
+      const InputSnapshot & inputSnapshot = input.update();
+      printInputChanges( inputSnapshot, inputTelemetry, currentTime, startedAt );
 
-      const u64 buttonsDown = padGetButtonsDown( &pad );
-
-      if ( ( buttonsDown & HidNpadButton_Plus ) != 0 )
+      if ( ( inputSnapshot.buttons_down & HidNpadButton_Plus ) != 0 )
       {
-        std::cout << std::format( "[+{:.3f} ms] Exit requested by controller\n",
-                                  std::chrono::duration<double, std::milli>{ currentTime - startedAt }.count() );
+        printTimestamp( currentTime, startedAt );
+        std::cout << "Exit requested by controller\n";
         break;
       }
 

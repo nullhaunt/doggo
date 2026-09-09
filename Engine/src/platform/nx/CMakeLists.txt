@@ -1,6 +1,7 @@
 add_library(doggo_platform_nx STATIC
         nx_AppletLifecycle.cpp
         nx_Application.cpp
+        nx_Input.cpp
         nx_Memory.cpp
         nx_MonotonicClock.cpp
 )

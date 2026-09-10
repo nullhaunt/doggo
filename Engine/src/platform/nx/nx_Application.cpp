@@ -20,6 +20,7 @@
 namespace
 {
   constexpr double       BytesPerMebibyte          = 1024.0 * 1024.0;
+  constexpr double       MillisecondsPerSecond     = 1'000.0;
   constexpr double       NanosecondsPerMillisecond = 1'000'000.0;
   constexpr std::int32_t StickDirectionThreshold   = JOYSTICK_MAX / 4;
   constexpr auto         AudioTelemetryInterval    = std::chrono::seconds( 5 );
@@ -253,16 +254,26 @@ namespace
                           const doggo::platform::nx::MonotonicClock::time_point timestamp,
                           const doggo::platform::nx::MonotonicClock::time_point startedAt )
   {
+    const double bufferedMilliseconds = static_cast<double>( telemetry.buffered_sample_count ) *
+                                        MillisecondsPerSecond /
+                                        doggo::platform::nx::AudrenTone::SampleRate;
+    const double minimumBufferedMilliseconds = static_cast<double>( telemetry.minimum_buffered_sample_count ) *
+                                               MillisecondsPerSecond /
+                                               doggo::platform::nx::AudrenTone::SampleRate;
+
     writeLog( logger,
               doggo::log::Level::Info,
               "Audio",
-              std::format( "Frames: {}, samples: {}, buffers: {}/{} (low {}), underruns: {}, voice drops: {}, "
+              std::format( "Frames: {}, samples: {}, buffers: {}/{} (low {}), buffered: {:.1f} ms (low {:.1f}), "
+                           "underruns: {}, voice drops: {}, "
                            "late wakes: {}, max gap: {:.3f} ms, max update: {:.3f} ms",
                            telemetry.renderer_frame_count,
                            telemetry.played_sample_count,
                            telemetry.queued_buffer_count,
                            doggo::platform::nx::AudrenTone::BufferCount,
                            telemetry.minimum_buffer_count,
+                           bufferedMilliseconds,
+                           minimumBufferedMilliseconds,
                            telemetry.buffer_underrun_count,
                            telemetry.voice_drop_count,
                            telemetry.late_wakeup_count,

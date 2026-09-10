@@ -30,9 +30,10 @@ namespace
     }
   }
 
-  void updateMinimum( std::atomic<std::uint32_t> & destination, const std::uint32_t candidate ) noexcept
+  template <typename Type>
+  void updateMinimum( std::atomic<Type> & destination, const Type candidate ) noexcept
   {
-    std::uint32_t current = destination.load( std::memory_order_relaxed );
+    Type current = destination.load( std::memory_order_relaxed );
     while ( current > candidate && !destination.compare_exchange_weak( current, candidate, std::memory_order_relaxed ) )
     {
     }
@@ -226,21 +227,23 @@ namespace doggo::platform::nx
   AudrenTelemetry AudrenTone::telemetry() const noexcept
   {
     return AudrenTelemetry{
-        .renderer_frame_count   = mRendererFrameCount.load( std::memory_order_relaxed ),
-        .played_sample_count    = mPlayedSampleCount.load( std::memory_order_relaxed ),
-        .buffer_underrun_count  = mBufferUnderrunCount.load( std::memory_order_relaxed ),
-        .voice_drop_count       = mVoiceDropCount.load( std::memory_order_relaxed ),
-        .late_wakeup_count      = mLateWakeupCount.load( std::memory_order_relaxed ),
-        .injected_stall_count   = mInjectedStallCount.load( std::memory_order_relaxed ),
-        .update_failure_count   = mUpdateFailureCount.load( std::memory_order_relaxed ),
-        .wait_failure_count     = mWaitFailureCount.load( std::memory_order_relaxed ),
-        .maximum_wakeup_gap_ns  = mMaximumWakeupGapNs.load( std::memory_order_relaxed ),
-        .maximum_update_time_ns = mMaximumUpdateTimeNs.load( std::memory_order_relaxed ),
-        .queued_buffer_count    = mQueuedBufferCount.load( std::memory_order_relaxed ),
-        .minimum_buffer_count   = mMinimumBufferCount.load( std::memory_order_relaxed ),
-        .last_update_result     = mLastUpdateResult.load( std::memory_order_relaxed ),
-        .last_wait_result       = mLastWaitResult.load( std::memory_order_relaxed ),
-        .is_paused              = mIsPaused.load( std::memory_order_relaxed ),
+        .renderer_frame_count          = mRendererFrameCount.load( std::memory_order_relaxed ),
+        .played_sample_count           = mPlayedSampleCount.load( std::memory_order_relaxed ),
+        .buffer_underrun_count         = mBufferUnderrunCount.load( std::memory_order_relaxed ),
+        .voice_drop_count              = mVoiceDropCount.load( std::memory_order_relaxed ),
+        .late_wakeup_count             = mLateWakeupCount.load( std::memory_order_relaxed ),
+        .injected_stall_count          = mInjectedStallCount.load( std::memory_order_relaxed ),
+        .update_failure_count          = mUpdateFailureCount.load( std::memory_order_relaxed ),
+        .wait_failure_count            = mWaitFailureCount.load( std::memory_order_relaxed ),
+        .maximum_wakeup_gap_ns         = mMaximumWakeupGapNs.load( std::memory_order_relaxed ),
+        .maximum_update_time_ns        = mMaximumUpdateTimeNs.load( std::memory_order_relaxed ),
+        .buffered_sample_count         = mBufferedSampleCount.load( std::memory_order_relaxed ),
+        .minimum_buffered_sample_count = mMinimumBufferedSampleCount.load( std::memory_order_relaxed ),
+        .queued_buffer_count           = mQueuedBufferCount.load( std::memory_order_relaxed ),
+        .minimum_buffer_count          = mMinimumBufferCount.load( std::memory_order_relaxed ),
+        .last_update_result            = mLastUpdateResult.load( std::memory_order_relaxed ),
+        .last_wait_result              = mLastWaitResult.load( std::memory_order_relaxed ),
+        .is_paused                     = mIsPaused.load( std::memory_order_relaxed ),
     };
   }
 
@@ -334,12 +337,23 @@ namespace doggo::platform::nx
     }
 
     mRendererFrameCount.fetch_add( 1, std::memory_order_relaxed );
-    mPlayedSampleCount.store( audrvVoiceGetPlayedSampleCount( &mDriver, voiceId ), std::memory_order_relaxed );
+
+    const std::uint32_t rawPlayedSamples = audrvVoiceGetPlayedSampleCount( &mDriver, voiceId );
+    mExtendedPlayedSampleCount += rawPlayedSamples - mPreviousRawPlayedSamples;
+    mPreviousRawPlayedSamples = rawPlayedSamples;
+    mPlayedSampleCount.store( mExtendedPlayedSampleCount, std::memory_order_relaxed );
     mVoiceDropCount.store( audrvVoiceGetVoiceDropsCount( &mDriver, voiceId ), std::memory_order_relaxed );
+
+    std::uint64_t bufferedSamplesBeforeRefill = 0;
+    if ( mSubmittedSampleCount > mExtendedPlayedSampleCount )
+    {
+      bufferedSamplesBeforeRefill = mSubmittedSampleCount - mExtendedPlayedSampleCount;
+    }
+    updateMinimum( mMinimumBufferedSampleCount, bufferedSamplesBeforeRefill );
 
     const std::uint32_t remainingBufferCount = countQueuedBuffers();
     updateMinimum( mMinimumBufferCount, remainingBufferCount );
-    if ( remainingBufferCount == 0 && !shouldPause )
+    if ( bufferedSamplesBeforeRefill == 0 && !shouldPause )
     {
       mBufferUnderrunCount.fetch_add( 1, std::memory_order_relaxed );
     }
@@ -352,6 +366,12 @@ namespace doggo::platform::nx
     }
 
     mQueuedBufferCount.store( countQueuedBuffers(), std::memory_order_relaxed );
+    std::uint64_t bufferedSamplesAfterRefill = 0;
+    if ( mSubmittedSampleCount > mExtendedPlayedSampleCount )
+    {
+      bufferedSamplesAfterRefill = mSubmittedSampleCount - mExtendedPlayedSampleCount;
+    }
+    mBufferedSampleCount.store( bufferedSamplesAfterRefill, std::memory_order_relaxed );
     return true;
   }
 
@@ -410,7 +430,14 @@ namespace doggo::platform::nx
       if ( waveBuffer.state == AudioDriverWaveBufState_Done )
       {
         constexpr std::int32_t voiceId = 0;
-        didQueueEveryBuffer            = audrvVoiceAddWaveBuf( &mDriver, voiceId, &waveBuffer ) && didQueueEveryBuffer;
+        if ( audrvVoiceAddWaveBuf( &mDriver, voiceId, &waveBuffer ) )
+        {
+          mSubmittedSampleCount += SamplesPerBuffer;
+        }
+        else
+        {
+          didQueueEveryBuffer = false;
+        }
       }
     }
     return didQueueEveryBuffer;

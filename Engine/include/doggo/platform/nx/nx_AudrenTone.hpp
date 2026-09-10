@@ -104,9 +104,10 @@ namespace doggo::platform::nx
       std::atomic<std::uint32_t> mLastWaitResult     = 0;
       std::atomic<bool>          mIsPaused           = false;
 
-      std::uint64_t mSubmittedSampleCount      = static_cast<std::uint64_t>( BufferCount * SamplesPerBuffer );
-      std::uint64_t mExtendedPlayedSampleCount = 0;
-      std::uint32_t mPreviousRawPlayedSamples  = 0;
+      std::uint64_t mSubmittedSampleCount         = static_cast<std::uint64_t>( BufferCount * SamplesPerBuffer );
+      std::uint64_t mPendingSubmissionSampleCount = 0;
+      std::uint64_t mExtendedPlayedSampleCount    = 0;
+      std::uint32_t mPreviousRawPlayedSamples     = 0;
 
       bool mIsAudrenInitialized = false;
       bool mIsDriverInitialized = false;

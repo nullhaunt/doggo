@@ -325,6 +325,13 @@ namespace doggo::platform::nx
       mIsPaused.store( shouldPause, std::memory_order_relaxed );
     }
 
+    // Wave buffers accepted by audrvVoiceAddWaveBuf after the previous update
+    // are only submitted to audren by this update. The returned voice counters
+    // describe the renderer interval which just finished, so exclude those
+    // pending samples when measuring whether that interval ran out of audio.
+    const std::uint64_t submittedSamplesBeforeUpdate = mSubmittedSampleCount;
+    const std::uint64_t pendingSubmissionSamples     = mPendingSubmissionSampleCount;
+
     const Result        updateResult = audrvUpdate( &mDriver );
     const std::uint64_t updateTimeNs = monotonicNanoseconds() - wakeTimeNs;
     updateMaximum( mMaximumUpdateTimeNs, updateTimeNs );
@@ -336,6 +343,8 @@ namespace doggo::platform::nx
       return false;
     }
 
+    mSubmittedSampleCount += pendingSubmissionSamples;
+    mPendingSubmissionSampleCount = 0;
     mRendererFrameCount.fetch_add( 1, std::memory_order_relaxed );
 
     const std::uint32_t rawPlayedSamples = audrvVoiceGetPlayedSampleCount( &mDriver, voiceId );
@@ -345,9 +354,9 @@ namespace doggo::platform::nx
     mVoiceDropCount.store( audrvVoiceGetVoiceDropsCount( &mDriver, voiceId ), std::memory_order_relaxed );
 
     std::uint64_t bufferedSamplesBeforeRefill = 0;
-    if ( mSubmittedSampleCount > mExtendedPlayedSampleCount )
+    if ( submittedSamplesBeforeUpdate > mExtendedPlayedSampleCount )
     {
-      bufferedSamplesBeforeRefill = mSubmittedSampleCount - mExtendedPlayedSampleCount;
+      bufferedSamplesBeforeRefill = submittedSamplesBeforeUpdate - mExtendedPlayedSampleCount;
     }
     updateMinimum( mMinimumBufferedSampleCount, bufferedSamplesBeforeRefill );
 
@@ -432,7 +441,7 @@ namespace doggo::platform::nx
         constexpr std::int32_t voiceId = 0;
         if ( audrvVoiceAddWaveBuf( &mDriver, voiceId, &waveBuffer ) )
         {
-          mSubmittedSampleCount += SamplesPerBuffer;
+          mPendingSubmissionSampleCount += SamplesPerBuffer;
         }
         else
         {

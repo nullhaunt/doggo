@@ -2,6 +2,7 @@
 
 #include "doggo/log/log_Log.hpp"
 #include "doggo/platform/nx/nx_AppletLifecycle.hpp"
+#include "doggo/platform/nx/nx_AudrenTone.hpp"
 #include "doggo/platform/nx/nx_Input.hpp"
 #include "doggo/platform/nx/nx_LogSinks.hpp"
 #include "doggo/platform/nx/nx_Memory.hpp"
@@ -18,8 +19,10 @@
 
 namespace
 {
-  constexpr double       BytesPerMebibyte        = 1024.0 * 1024.0;
-  constexpr std::int32_t StickDirectionThreshold = JOYSTICK_MAX / 4;
+  constexpr double       BytesPerMebibyte          = 1024.0 * 1024.0;
+  constexpr double       NanosecondsPerMillisecond = 1'000'000.0;
+  constexpr std::int32_t StickDirectionThreshold   = JOYSTICK_MAX / 4;
+  constexpr auto         AudioTelemetryInterval    = std::chrono::seconds( 5 );
 
   constexpr std::uint64_t StickPseudoButtonMask = HidNpadButton_StickLLeft |
                                                   HidNpadButton_StickLUp |
@@ -46,6 +49,11 @@ namespace
                 const doggo::platform::nx::MonotonicClock::time_point startedAt ) noexcept
   {
     return std::chrono::duration_cast<std::chrono::nanoseconds>( timestamp - startedAt );
+  }
+
+  [[nodiscard]] std::string formatResult( const std::uint32_t result )
+  {
+    return std::format( "0x{:08X}", result );
   }
 
   void writeLog( doggo::log::Logger &                                  logger,
@@ -240,9 +248,91 @@ namespace
         startedAt );
   }
 
-  [[nodiscard]] std::string formatResult( const std::uint32_t result )
+  void logAudioTelemetry( doggo::log::Logger &                                  logger,
+                          const doggo::platform::nx::AudrenTelemetry &          telemetry,
+                          const doggo::platform::nx::MonotonicClock::time_point timestamp,
+                          const doggo::platform::nx::MonotonicClock::time_point startedAt )
   {
-    return std::format( "0x{:08X}", result );
+    writeLog( logger,
+              doggo::log::Level::Info,
+              "Audio",
+              std::format( "Frames: {}, samples: {}, buffers: {}/{} (low {}), underruns: {}, voice drops: {}, "
+                           "late wakes: {}, max gap: {:.3f} ms, max update: {:.3f} ms",
+                           telemetry.renderer_frame_count,
+                           telemetry.played_sample_count,
+                           telemetry.queued_buffer_count,
+                           doggo::platform::nx::AudrenTone::BufferCount,
+                           telemetry.minimum_buffer_count,
+                           telemetry.buffer_underrun_count,
+                           telemetry.voice_drop_count,
+                           telemetry.late_wakeup_count,
+                           static_cast<double>( telemetry.maximum_wakeup_gap_ns ) / NanosecondsPerMillisecond,
+                           static_cast<double>( telemetry.maximum_update_time_ns ) / NanosecondsPerMillisecond ),
+              timestamp,
+              startedAt );
+  }
+
+  [[nodiscard]] bool logAudioFaultChanges( doggo::log::Logger &                                  logger,
+                                           const doggo::platform::nx::AudrenTelemetry &          current,
+                                           const doggo::platform::nx::AudrenTelemetry &          previous,
+                                           const doggo::platform::nx::MonotonicClock::time_point timestamp,
+                                           const doggo::platform::nx::MonotonicClock::time_point startedAt )
+  {
+    bool hasUnexpectedFailure = false;
+
+    if ( current.buffer_underrun_count != previous.buffer_underrun_count )
+    {
+      const bool isInjected = current.buffer_underrun_count <= current.injected_stall_count;
+      writeLog( logger,
+                isInjected ? doggo::log::Level::Warning : doggo::log::Level::Error,
+                "Audio",
+                std::format( "{} buffer underrun detected (total {}, injected stalls {})",
+                             isInjected ? "Injected" : "Unexpected",
+                             current.buffer_underrun_count,
+                             current.injected_stall_count ),
+                timestamp,
+                startedAt );
+      hasUnexpectedFailure = !isInjected;
+    }
+
+    if ( current.voice_drop_count != previous.voice_drop_count )
+    {
+      writeLog( logger,
+                doggo::log::Level::Error,
+                "Audio",
+                std::format( "audren voice drops increased to {}", current.voice_drop_count ),
+                timestamp,
+                startedAt );
+      hasUnexpectedFailure = true;
+    }
+
+    if ( current.update_failure_count != previous.update_failure_count )
+    {
+      writeLog( logger,
+                doggo::log::Level::Error,
+                "Audio",
+                std::format( "Driver update failed: {} (failures {})",
+                             formatResult( current.last_update_result ),
+                             current.update_failure_count ),
+                timestamp,
+                startedAt );
+      hasUnexpectedFailure = true;
+    }
+
+    if ( current.wait_failure_count != previous.wait_failure_count )
+    {
+      writeLog( logger,
+                doggo::log::Level::Error,
+                "Audio",
+                std::format( "Frame-event wait failed: {} (failures {})",
+                             formatResult( current.last_wait_result ),
+                             current.wait_failure_count ),
+                timestamp,
+                startedAt );
+      hasUnexpectedFailure = true;
+    }
+
+    return hasUnexpectedFailure;
   }
 
   void logLifecycleEvent( doggo::log::Logger &                                  logger,
@@ -325,6 +415,9 @@ namespace doggo::platform::nx
     Input input;
     input.initialize();
 
+    AudrenTone          audio;
+    const std::uint32_t audioResult = audio.initialize();
+
     writeLog( logger, log::Level::Info, "Startup", "DOGGO Gate 0 - Platform Proof", startedAt, startedAt );
     writeLog( logger,
               log::Level::Info,
@@ -341,6 +434,39 @@ namespace doggo::platform::nx
                 log::Level::Error,
                 "Lifecycle",
                 std::format( "Hook initialization failed: {}", formatResult( lifecycleResult ) ),
+                MonotonicClock::now(),
+                startedAt );
+      exitCode = EXIT_FAILURE;
+    }
+
+    if ( R_SUCCEEDED( audioResult ) )
+    {
+      writeLog( logger,
+                log::Level::Info,
+                "Audio",
+                std::format( "audren started: {} Hz, {} samples/frame, {} buffers ({} ms), {} Hz tone",
+                             AudrenTone::SampleRate,
+                             AudrenTone::SamplesPerBuffer,
+                             AudrenTone::BufferCount,
+                             AudrenTone::BufferCount * AUDREN_TIMER_PERIOD_MS,
+                             AudrenTone::ToneFrequency ),
+                MonotonicClock::now(),
+                startedAt );
+      writeLog( logger,
+                log::Level::Info,
+                "Audio",
+                std::format( "Frame-event service thread: core {}, priority 0x{:02X}",
+                             AudrenTone::ThreadCore,
+                             AudrenTone::ThreadPriority ),
+                MonotonicClock::now(),
+                startedAt );
+    }
+    else
+    {
+      writeLog( logger,
+                log::Level::Error,
+                "Audio",
+                std::format( "Initialization failed: {}", formatResult( audioResult ) ),
                 MonotonicClock::now(),
                 startedAt );
       exitCode = EXIT_FAILURE;
@@ -366,14 +492,16 @@ namespace doggo::platform::nx
     writeLog( logger,
               log::Level::Info,
               "Input",
-              "Exercise connection, buttons, and both sticks; press (+) to exit",
+              "Press (A) for a 30 ms audio stall and (+) to exit",
               MonotonicClock::now(),
               startedAt );
 
-    MonotonicClock::time_point previousTime = startedAt;
-    bool                       isRunning    = true;
-    AppletFocusState           focusState   = AppletFocusState_InFocus;
+    MonotonicClock::time_point previousTime       = startedAt;
+    MonotonicClock::time_point nextAudioTelemetry = startedAt + AudioTelemetryInterval;
+    bool                       isRunning          = true;
+    AppletFocusState           focusState         = AppletFocusState_InFocus;
     InputTelemetryState        inputTelemetry;
+    AudrenTelemetry            previousAudioTelemetry = audio.telemetry();
 
     while ( isRunning )
     {
@@ -385,6 +513,7 @@ namespace doggo::platform::nx
         if ( lifecycleEvent.type == AppletLifecycleEventType::FocusStateChanged )
         {
           focusState = static_cast<AppletFocusState>( lifecycleEvent.detail );
+          audio.requestPause( focusState != AppletFocusState_InFocus );
         }
 
         logLifecycleEvent( logger, lifecycleEvent, startedAt );
@@ -428,6 +557,33 @@ namespace doggo::platform::nx
       const InputSnapshot & inputSnapshot = input.update();
       logInputChanges( logger, inputSnapshot, inputTelemetry, currentTime, startedAt );
 
+      if ( audio.isInitialized() && ( inputSnapshot.buttons_down & HidNpadButton_A ) != 0 )
+      {
+        writeLog( logger,
+                  log::Level::Warning,
+                  "Audio",
+                  "Injecting a 30 ms service-thread stall; one detected underrun is expected",
+                  currentTime,
+                  startedAt );
+        audio.requestUnderrunTest();
+      }
+
+      if ( audio.isInitialized() )
+      {
+        const AudrenTelemetry currentAudioTelemetry = audio.telemetry();
+        if ( logAudioFaultChanges( logger, currentAudioTelemetry, previousAudioTelemetry, currentTime, startedAt ) )
+        {
+          exitCode = EXIT_FAILURE;
+        }
+
+        if ( currentTime >= nextAudioTelemetry )
+        {
+          logAudioTelemetry( logger, currentAudioTelemetry, currentTime, startedAt );
+          nextAudioTelemetry = currentTime + AudioTelemetryInterval;
+        }
+        previousAudioTelemetry = currentAudioTelemetry;
+      }
+
       if ( ( inputSnapshot.buttons_down & HidNpadButton_Plus ) != 0 )
       {
         writeLog( logger, log::Level::Info, "Input", "Exit requested by controller", currentTime, startedAt );
@@ -446,6 +602,41 @@ namespace doggo::platform::nx
                 MonotonicClock::now(),
                 startedAt );
       exitCode = EXIT_FAILURE;
+    }
+
+    if ( audio.isInitialized() )
+    {
+      audio.finalize();
+      const AudrenTelemetry finalAudioTelemetry = audio.telemetry();
+      if ( logAudioFaultChanges( logger,
+                                 finalAudioTelemetry,
+                                 previousAudioTelemetry,
+                                 MonotonicClock::now(),
+                                 startedAt ) )
+      {
+        exitCode = EXIT_FAILURE;
+      }
+      logAudioTelemetry( logger, finalAudioTelemetry, MonotonicClock::now(), startedAt );
+
+      if ( finalAudioTelemetry.buffer_underrun_count != finalAudioTelemetry.injected_stall_count )
+      {
+        writeLog( logger,
+                  log::Level::Error,
+                  "Audio",
+                  std::format( "Underrun proof mismatch: {} detected for {} injected stalls",
+                               finalAudioTelemetry.buffer_underrun_count,
+                               finalAudioTelemetry.injected_stall_count ),
+                  MonotonicClock::now(),
+                  startedAt );
+        exitCode = EXIT_FAILURE;
+      }
+
+      if ( finalAudioTelemetry.voice_drop_count != 0 ||
+           finalAudioTelemetry.update_failure_count != 0 ||
+           finalAudioTelemetry.wait_failure_count != 0 )
+      {
+        exitCode = EXIT_FAILURE;
+      }
     }
 
     writeLog( logger,

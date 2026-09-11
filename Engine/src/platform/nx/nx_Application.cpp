@@ -2,6 +2,7 @@
 
 #include "doggo/log/log_Log.hpp"
 #include "doggo/platform/nx/nx_AppletLifecycle.hpp"
+#include "doggo/platform/nx/nx_ApplicationStorage.hpp"
 #include "doggo/platform/nx/nx_AudrenTone.hpp"
 #include "doggo/platform/nx/nx_Input.hpp"
 #include "doggo/platform/nx/nx_LogSinks.hpp"
@@ -24,12 +25,16 @@
 
 namespace
 {
-  constexpr double       BytesPerMebibyte          = 1024.0 * 1024.0;
-  constexpr double       MillisecondsPerSecond     = 1'000.0;
-  constexpr double       NanosecondsPerMillisecond = 1'000'000.0;
-  constexpr std::int32_t StickDirectionThreshold   = JOYSTICK_MAX / 4;
-  constexpr auto         AudioTelemetryInterval    = std::chrono::seconds( 5 );
-  constexpr char         RomFsFixturePath[]        = "romfs:/gate0/read_fixture.bin";
+  constexpr double       BytesPerMebibyte            = 1024.0 * 1024.0;
+  constexpr double       MillisecondsPerSecond       = 1'000.0;
+  constexpr double       NanosecondsPerMillisecond   = 1'000'000.0;
+  constexpr std::int32_t StickDirectionThreshold     = JOYSTICK_MAX / 4;
+  constexpr auto         AudioTelemetryInterval      = std::chrono::seconds( 5 );
+  constexpr char         RomFsFixturePath[]          = "romfs:/gate0/read_fixture.bin";
+  constexpr char         SaveFixtureName[]           = "gate0_save_fixture.bin";
+  constexpr std::size_t  SaveFixtureSize             = 64;
+  constexpr std::size_t  SaveFixtureGenerationOffset = 16;
+  constexpr std::size_t  SaveFixtureChecksumOffset   = 56;
 
   constexpr std::array<std::uint8_t, 64> ExpectedRomFsFixture = {
       0x44, 0x4F, 0x47, 0x47, 0x4F, 0x52, 0x46, 0x53, 0x01, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00,
@@ -84,6 +89,123 @@ namespace
   }
 
   static_assert( fnv1a64( std::span<const std::uint8_t>{ ExpectedRomFsFixture } ) == ExpectedRomFsFixtureHash );
+
+  constexpr void writeLittleEndian32( std::array<std::uint8_t, SaveFixtureSize> & destination,
+                                      const std::size_t                           offset,
+                                      const std::uint32_t                         value ) noexcept
+  {
+    for ( std::size_t index = 0; index < sizeof( value ); ++index )
+    {
+      destination[ offset + index ] = static_cast<std::uint8_t>( value >> ( index * 8 ) );
+    }
+  }
+
+  constexpr void writeLittleEndian64( std::array<std::uint8_t, SaveFixtureSize> & destination,
+                                      const std::size_t                           offset,
+                                      const std::uint64_t                         value ) noexcept
+  {
+    for ( std::size_t index = 0; index < sizeof( value ); ++index )
+    {
+      destination[ offset + index ] = static_cast<std::uint8_t>( value >> ( index * 8 ) );
+    }
+  }
+
+  [[nodiscard]] constexpr std::uint64_t readLittleEndian64( const std::array<std::uint8_t, SaveFixtureSize> & source,
+                                                            const std::size_t offset ) noexcept
+  {
+    std::uint64_t value = 0;
+    for ( std::size_t index = 0; index < sizeof( value ); ++index )
+    {
+      value |= static_cast<std::uint64_t>( source[ offset + index ] ) << ( index * 8 );
+    }
+
+    return value;
+  }
+
+  [[nodiscard]] constexpr std::array<std::uint8_t, SaveFixtureSize>
+  makeSaveFixture( const std::uint64_t generation ) noexcept
+  {
+    constexpr std::array<std::uint8_t, 8> magic = { 0x44, 0x4F, 0x47, 0x47, 0x4F, 0x53, 0x41, 0x56 };
+
+    std::array<std::uint8_t, SaveFixtureSize> fixture = {};
+    for ( std::size_t index = 0; index < magic.size(); ++index )
+    {
+      fixture[ index ] = magic[ index ];
+    }
+
+    writeLittleEndian32( fixture, 8, 1 );
+    writeLittleEndian32( fixture, 12, static_cast<std::uint32_t>( SaveFixtureSize ) );
+    writeLittleEndian64( fixture, SaveFixtureGenerationOffset, generation );
+
+    for ( std::size_t index = 0; index < 32; ++index )
+    {
+      fixture[ 24 + index ] = static_cast<std::uint8_t>( 0xA0 + index );
+    }
+
+    const std::uint64_t checksum =
+        fnv1a64( std::span<const std::uint8_t>{ fixture.data(), SaveFixtureChecksumOffset } );
+    writeLittleEndian64( fixture, SaveFixtureChecksumOffset, checksum );
+    return fixture;
+  }
+
+  constexpr auto FirstSaveFixture = makeSaveFixture( 1 );
+  static_assert( readLittleEndian64( FirstSaveFixture, SaveFixtureChecksumOffset ) == 0x65FCF37B61C6B04B );
+  static_assert( fnv1a64( std::span<const std::uint8_t>{ FirstSaveFixture } ) == 0xCC89D9B280F89DE4 );
+
+  [[nodiscard]] const char *
+  getApplicationStorageStatusName( const doggo::platform::nx::ApplicationStorageStatus status ) noexcept
+  {
+    using Status = doggo::platform::nx::ApplicationStorageStatus;
+    switch ( status )
+    {
+      case Status::Success:
+        return "Success";
+
+      case Status::NotInitialized:
+        return "Not Initialized";
+
+      case Status::InvalidName:
+        return "Invalid Name";
+
+      case Status::NotFound:
+        return "Not Found";
+
+      case Status::DirectoryFailed:
+        return "Directory Failed";
+
+      case Status::StatFailed:
+        return "Stat Failed";
+
+      case Status::DestinationTooSmall:
+        return "Destination too Small";
+
+      case Status::OpenFailed:
+        return "Open Failed";
+
+      case Status::ReadFailed:
+        return "Read Failed";
+
+      case Status::WriteFailed:
+        return "Write Failed";
+
+      case Status::FlushFailed:
+        return "Flush Failed";
+
+      case Status::CloseFailed:
+        return "Close Failed";
+
+      case Status::RemoveFailed:
+        return "Remove Failed";
+
+      case Status::RenameFailed:
+        return "Rename Failed";
+
+      case Status::CommitFailed:
+        return "Commit Failed";
+    }
+
+    return "Unknown";
+  }
 
   [[nodiscard]] const char * getRomFsReadStatusName( const doggo::platform::nx::RomFsReadStatus status ) noexcept
   {
@@ -188,6 +310,146 @@ namespace
         std::format( "Validated {}: {} exact bytes, FNV-1a 0x{:016X}", RomFsFixturePath, report.file_size, actualHash ),
         doggo::platform::nx::MonotonicClock::now(),
         startedAt );
+    return true;
+  }
+
+  void logApplicationStorageFailure( doggo::log::Logger &                                  logger,
+                                     const std::string_view                                action,
+                                     const doggo::platform::nx::ApplicationStorageReport & report,
+                                     const doggo::platform::nx::MonotonicClock::time_point startedAt )
+  {
+    writeLog( logger,
+              doggo::log::Level::Error,
+              "FileSystem",
+              std::format( "{}: {} (errno {}, result {}, {} of {} bytes)",
+                           action,
+                           getApplicationStorageStatusName( report.status ),
+                           report.error_number,
+                           formatResult( report.native_result ),
+                           report.bytes_transferred,
+                           report.file_size ),
+              doggo::platform::nx::MonotonicClock::now(),
+              startedAt );
+  }
+
+  [[nodiscard]] bool isValidCommittedSaveFixture( doggo::log::Logger &                                  logger,
+                                                  doggo::platform::nx::ApplicationStorage &             storage,
+                                                  const doggo::platform::nx::MonotonicClock::time_point startedAt )
+  {
+    const std::uint32_t mountResult = storage.initialize();
+    if ( R_FAILED( mountResult ) )
+    {
+      writeLog( logger,
+                doggo::log::Level::Error,
+                "FileSystem",
+                std::format( "Writable storage initialization failed: {}", formatResult( mountResult ) ),
+                doggo::platform::nx::MonotonicClock::now(),
+                startedAt );
+      return false;
+    }
+
+    std::uint64_t                                       previousGeneration = 0;
+    std::array<std::uint8_t, SaveFixtureSize>           previousFixture    = {};
+    const doggo::platform::nx::ApplicationStorageReport previousReport =
+        storage.readCommittedFile( SaveFixtureName, previousFixture );
+
+    if ( previousReport.status == doggo::platform::nx::ApplicationStorageStatus::Success )
+    {
+      const std::uint64_t storedGeneration = readLittleEndian64( previousFixture, SaveFixtureGenerationOffset );
+      const auto          expectedPrevious = makeSaveFixture( storedGeneration );
+      if ( storedGeneration == 0 ||
+           previousReport.file_size != previousFixture.size() ||
+           previousReport.bytes_transferred != previousFixture.size() ||
+           previousFixture != expectedPrevious )
+      {
+        const std::uint64_t actualHash =
+            fnv1a64( std::span<const std::uint8_t>{ previousFixture.data(), previousReport.bytes_transferred } );
+        writeLog( logger,
+                  doggo::log::Level::Error,
+                  "FileSystem",
+                  std::format( "Committed save fixture is invalid: {} bytes, FNV-1a 0x{:016X}",
+                               previousReport.file_size,
+                               actualHash ),
+                  doggo::platform::nx::MonotonicClock::now(),
+                  startedAt );
+        return false;
+      }
+
+      previousGeneration = storedGeneration;
+      writeLog( logger,
+                doggo::log::Level::Info,
+                "FileSystem",
+                std::format( "Previous committed save fixture valid: generation {}", previousGeneration ),
+                doggo::platform::nx::MonotonicClock::now(),
+                startedAt );
+    }
+    else if ( previousReport.status != doggo::platform::nx::ApplicationStorageStatus::NotFound )
+    {
+      logApplicationStorageFailure( logger, "Committed save fixture read failed", previousReport, startedAt );
+      return false;
+    }
+
+    if ( previousGeneration == std::numeric_limits<std::uint64_t>::max() )
+    {
+      writeLog( logger,
+                doggo::log::Level::Error,
+                "FileSystem",
+                "Committed save fixture generation exhausted",
+                doggo::platform::nx::MonotonicClock::now(),
+                startedAt );
+      return false;
+    }
+
+    const std::uint64_t                                 nextGeneration  = previousGeneration + 1;
+    const auto                                          expectedFixture = makeSaveFixture( nextGeneration );
+    const doggo::platform::nx::ApplicationStorageReport writeReport =
+        storage.writeCommittedFile( SaveFixtureName, expectedFixture );
+    if ( writeReport.status != doggo::platform::nx::ApplicationStorageStatus::Success )
+    {
+      logApplicationStorageFailure( logger, "Committed save fixture write failed", writeReport, startedAt );
+      return false;
+    }
+
+    std::array<std::uint8_t, SaveFixtureSize>           readBackFixture = {};
+    const doggo::platform::nx::ApplicationStorageReport readBackReport =
+        storage.readCommittedFile( SaveFixtureName, readBackFixture );
+    if ( readBackReport.status != doggo::platform::nx::ApplicationStorageStatus::Success )
+    {
+      logApplicationStorageFailure( logger, "Committed save fixture read-back failed", readBackReport, startedAt );
+      return false;
+    }
+
+    const std::uint64_t actualHash =
+        fnv1a64( std::span<const std::uint8_t>{ readBackFixture.data(), readBackReport.bytes_transferred } );
+    const bool isExactSize = readBackReport.file_size == expectedFixture.size() &&
+                             readBackReport.bytes_transferred == expectedFixture.size();
+    if ( !isExactSize || readBackFixture != expectedFixture )
+    {
+      writeLog( logger,
+                doggo::log::Level::Error,
+                "FileSystem",
+                std::format( "Committed save fixture validation failed: expected {} bytes, "
+                             "got {} bytes/FNV-1a 0x{:016X}",
+                             expectedFixture.size(),
+                             readBackReport.file_size,
+                             actualHash ),
+                doggo::platform::nx::MonotonicClock::now(),
+                startedAt );
+      return false;
+    }
+
+    writeLog( logger,
+              doggo::log::Level::Info,
+              "FileSystem",
+              std::format( "Committed {}/{} via {}: generation {}, {} exact bytes, FNV-1a 0x{:016X}",
+                           storage.rootPath(),
+                           SaveFixtureName,
+                           storage.backendName(),
+                           nextGeneration,
+                           readBackReport.file_size,
+                           actualHash ),
+              doggo::platform::nx::MonotonicClock::now(),
+              startedAt );
     return true;
   }
 
@@ -569,6 +831,12 @@ namespace doggo::platform::nx
       exitCode = EXIT_FAILURE;
     }
 
+    ApplicationStorage storage;
+    if ( !isValidCommittedSaveFixture( logger, storage, startedAt ) )
+    {
+      exitCode = EXIT_FAILURE;
+    }
+
     if ( R_FAILED( lifecycleResult ) )
     {
       writeLog( logger,
@@ -778,6 +1046,18 @@ namespace doggo::platform::nx
       {
         exitCode = EXIT_FAILURE;
       }
+    }
+
+    const std::uint32_t storageFinalizeResult = storage.finalize();
+    if ( R_FAILED( storageFinalizeResult ) )
+    {
+      writeLog( logger,
+                log::Level::Error,
+                "FileSystem",
+                std::format( "Writable storage finalization failed: {}", formatResult( storageFinalizeResult ) ),
+                MonotonicClock::now(),
+                startedAt );
+      exitCode = EXIT_FAILURE;
     }
 
     const std::uint32_t romFsFinalizeResult = romFs.finalize();

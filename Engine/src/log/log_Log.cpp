@@ -34,7 +34,7 @@ namespace
 
     const auto [ outIt, totalSize ] = std::format_to_n( output.data(),
                                                         output.size(),
-                                                        "[+{}.{:03d} ms] [{:^6}] [{:.{}}] ",
+                                                        "[+{}.{:03d} ms] [{:^7}] [{:.{}}] ",
                                                         static_cast<long long>( elapsedMilliseconds ),
                                                         static_cast<long long>( elapsedFraction ),
                                                         doggo::log::levelName( record.level ).data(),

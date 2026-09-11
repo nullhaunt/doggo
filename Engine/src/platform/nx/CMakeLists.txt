@@ -1,6 +1,7 @@
 add_library(doggo_platform_nx STATIC
         nx_AppletLifecycle.cpp
         nx_Application.cpp
+        nx_ApplicationStorage.cpp
         nx_AudrenTone.cpp
         nx_Input.cpp
         nx_LogSinks.cpp

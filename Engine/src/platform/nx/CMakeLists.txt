@@ -26,6 +26,7 @@ target_link_libraries(doggo_platform_nx
         PUBLIC
         doggo::save
         PRIVATE
+        doggo::gpu::deko
         doggo::log
         nx
 )

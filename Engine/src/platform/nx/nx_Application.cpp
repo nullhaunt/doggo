@@ -1,5 +1,6 @@
 #include "doggo/platform/nx/nx_Application.hpp"
 
+#include "doggo/gpu/deko/deko_GraphicsContext.hpp"
 #include "doggo/log/log_Log.hpp"
 #include "doggo/platform/nx/nx_AppletLifecycle.hpp"
 #include "doggo/platform/nx/nx_AudrenTone.hpp"
@@ -718,6 +719,9 @@ namespace doggo::platform::nx
     Input input;
     input.initialize();
 
+    gpu::deko::GraphicsContext             graphicsContext;
+    const gpu::deko::GraphicsContextStatus graphicsStatus = graphicsContext.initialize( logger );
+
     AudrenTone          audio;
     const std::uint32_t audioResult = audio.initialize();
 
@@ -730,6 +734,27 @@ namespace doggo::platform::nx
               startedAt );
 
     int exitCode = EXIT_SUCCESS;
+
+    if ( graphicsStatus == gpu::deko::GraphicsContextStatus::Success )
+    {
+      writeLog( logger,
+                log::Level::Info,
+                "GPU",
+                "deko3d device and graphics queue initialized: depth [0, 1], upper-left origin, Y-up",
+                MonotonicClock::now(),
+                startedAt );
+    }
+    else
+    {
+      writeLog(
+          logger,
+          log::Level::Error,
+          "GPU",
+          std::format( "Initialization failed: {}", doggo::gpu::deko::getGraphicsContextStatusName( graphicsStatus ) ),
+          MonotonicClock::now(),
+          startedAt );
+      exitCode = EXIT_FAILURE;
+    }
 
     RomFs romFs;
     if ( !isValidRomFsFixture( logger, romFs, startedAt ) )
@@ -952,6 +977,18 @@ namespace doggo::platform::nx
       {
         exitCode = EXIT_FAILURE;
       }
+    }
+
+    const bool wasGraphicsInitialized = graphicsContext.isInitialized();
+    graphicsContext.finalize();
+    if ( wasGraphicsInitialized )
+    {
+      writeLog( logger,
+                log::Level::Info,
+                "GPU",
+                "deko3d device and graphics queue finalized",
+                MonotonicClock::now(),
+                startedAt );
     }
 
     const std::uint32_t storageFinalizeResult = storage.finalize();

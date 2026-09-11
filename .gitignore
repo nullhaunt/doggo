@@ -6,6 +6,7 @@ build/
 compile_commands.json
 
 # Switch build products
+romfs/
 *.elf
 *.nro
 *.nacp

@@ -58,6 +58,18 @@ target_link_libraries(${APP_TARGET}
         doggo::platform::nx
 )
 
+set(GATE0_SHADER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../Content/shaders/gate0")
+
+nx_add_shader_program(doggo_gate0_triangle_vsh
+        "${GATE0_SHADER_SOURCE_DIR}/gate0_triangle_vsh.glsl"
+        vert
+)
+
+nx_add_shader_program(doggo_gate0_triangle_fsh
+        "${GATE0_SHADER_SOURCE_DIR}/gate0_triangle_fsh.glsl"
+        frag
+)
+
 dkp_add_asset_target(${APP_ROMFS_TARGET}
         "${CMAKE_CURRENT_SOURCE_DIR}/romfs"
 )
@@ -65,6 +77,13 @@ dkp_add_asset_target(${APP_ROMFS_TARGET}
 dkp_track_assets(${APP_ROMFS_TARGET}
         FOLDER gate0
         FILES read_fixture.bin
+)
+
+dkp_install_assets(${APP_ROMFS_TARGET}
+        DESTINATION shaders/gate0
+        TARGETS
+        doggo_gate0_triangle_vsh
+        doggo_gate0_triangle_fsh
 )
 
 nx_generate_nacp(${APP_TARGET}.nacp

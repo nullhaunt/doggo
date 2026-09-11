@@ -39,6 +39,7 @@ if (NOT TARGET doggo::platform::nx)
 endif ()
 
 set(APP_TARGET doggo_game)
+set(APP_ROMFS_TARGET ${APP_TARGET}_romfs)
 set(APP_TITLE "DOGGO Game")
 set(APP_AUTHOR "Nullhaunt")
 set(APP_VERSION "${PROJECT_VERSION}")
@@ -57,6 +58,15 @@ target_link_libraries(${APP_TARGET}
         doggo::platform::nx
 )
 
+dkp_add_asset_target(${APP_ROMFS_TARGET}
+        "${CMAKE_CURRENT_SOURCE_DIR}/romfs"
+)
+
+dkp_track_assets(${APP_ROMFS_TARGET}
+        FOLDER gate0
+        FILES read_fixture.bin
+)
+
 nx_generate_nacp(${APP_TARGET}.nacp
         NAME "${APP_TITLE}"
         AUTHOR "${APP_AUTHOR}"
@@ -65,4 +75,5 @@ nx_generate_nacp(${APP_TARGET}.nacp
 
 nx_create_nro(${APP_TARGET}
         NACP ${APP_TARGET}.nacp
+        ROMFS ${APP_ROMFS_TARGET}
 )

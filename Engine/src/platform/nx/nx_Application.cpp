@@ -7,13 +7,18 @@
 #include "doggo/platform/nx/nx_LogSinks.hpp"
 #include "doggo/platform/nx/nx_Memory.hpp"
 #include "doggo/platform/nx/nx_MonotonicClock.hpp"
+#include "doggo/platform/nx/nx_RomFs.hpp"
 
 #include <switch.h>
 
+#include <array>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <format>
 #include <limits>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -24,6 +29,15 @@ namespace
   constexpr double       NanosecondsPerMillisecond = 1'000'000.0;
   constexpr std::int32_t StickDirectionThreshold   = JOYSTICK_MAX / 4;
   constexpr auto         AudioTelemetryInterval    = std::chrono::seconds( 5 );
+  constexpr char         RomFsFixturePath[]        = "romfs:/gate0/read_fixture.bin";
+
+  constexpr std::array<std::uint8_t, 64> ExpectedRomFsFixture = {
+      0x44, 0x4F, 0x47, 0x47, 0x4F, 0x52, 0x46, 0x53, 0x01, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00,
+      0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+      0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F,
+      0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F,
+  };
+  constexpr std::uint64_t ExpectedRomFsFixtureHash = 0x01BC5E25326D5821;
 
   constexpr std::uint64_t StickPseudoButtonMask = HidNpadButton_StickLLeft |
                                                   HidNpadButton_StickLUp |
@@ -57,6 +71,53 @@ namespace
     return std::format( "0x{:08X}", result );
   }
 
+  [[nodiscard]] constexpr std::uint64_t fnv1a64( const std::span<const std::uint8_t> bytes ) noexcept
+  {
+    std::uint64_t hash = 0xCBF29CE484222325;
+    for ( const std::uint8_t byte : bytes )
+    {
+      hash ^= byte;
+      hash *= 0x100000001B3;
+    }
+
+    return hash;
+  }
+
+  static_assert( fnv1a64( std::span<const std::uint8_t>{ ExpectedRomFsFixture } ) == ExpectedRomFsFixtureHash );
+
+  [[nodiscard]] const char * getRomFsReadStatusName( const doggo::platform::nx::RomFsReadStatus status ) noexcept
+  {
+    using Status = doggo::platform::nx::RomFsReadStatus;
+    switch ( status )
+    {
+      case Status::Success:
+        return "Success";
+
+      case Status::NotInitialized:
+        return "Not Initialized";
+
+      case Status::InvalidArgument:
+        return "Invalid Argument";
+
+      case Status::OpenFailed:
+        return "Open Failed";
+
+      case Status::StatFailed:
+        return "Stat Failed";
+
+      case Status::DestinationTooSmall:
+        return "Destination too Small";
+
+      case Status::ReadFailed:
+        return "Read Failed";
+
+      case Status::CloseFailed:
+        return "Close Failed";
+    }
+
+    return "Unknown";
+  }
+
   void writeLog( doggo::log::Logger &                                  logger,
                  const doggo::log::Level                               level,
                  const std::string_view                                category,
@@ -65,6 +126,69 @@ namespace
                  const doggo::platform::nx::MonotonicClock::time_point startedAt ) noexcept
   {
     logger.write( level, category, message, elapsedSince( timestamp, startedAt ) );
+  }
+
+  [[nodiscard]] bool isValidRomFsFixture( doggo::log::Logger &                                  logger,
+                                          doggo::platform::nx::RomFs &                          romFs,
+                                          const doggo::platform::nx::MonotonicClock::time_point startedAt )
+  {
+    const std::uint32_t mountResult = romFs.initialize();
+    if ( R_FAILED( mountResult ) )
+    {
+      writeLog( logger,
+                doggo::log::Level::Error,
+                "FileSystem",
+                std::format( "ROMFS mount failed: {}", formatResult( mountResult ) ),
+                doggo::platform::nx::MonotonicClock::now(),
+                startedAt );
+      return false;
+    }
+
+    std::array<std::uint8_t, ExpectedRomFsFixture.size()> fixtureBytes = {};
+    const doggo::platform::nx::RomFsReadReport            report = romFs.readFile( RomFsFixturePath, fixtureBytes );
+    if ( report.status != doggo::platform::nx::RomFsReadStatus::Success )
+    {
+      writeLog( logger,
+                doggo::log::Level::Error,
+                "FileSystem",
+                std::format( "ROMFS fixture read failed: {} (errno {}, {} of {} bytes)",
+                             getRomFsReadStatusName( report.status ),
+                             report.error_number,
+                             report.bytes_read,
+                             report.file_size ),
+                doggo::platform::nx::MonotonicClock::now(),
+                startedAt );
+      return false;
+    }
+
+    const std::uint64_t actualHash = fnv1a64( std::span<const std::uint8_t>{ fixtureBytes.data(), report.bytes_read } );
+    const bool          isExactSize  = report.file_size == ExpectedRomFsFixture.size();
+    const bool          isExactBytes = isExactSize && fixtureBytes == ExpectedRomFsFixture;
+    const bool          isExactHash  = actualHash == ExpectedRomFsFixtureHash;
+    if ( !isExactBytes || !isExactHash )
+    {
+      writeLog( logger,
+                doggo::log::Level::Error,
+                "FileSystem",
+                std::format( "ROMFS fixture validation failed: expected {} bytes/FNV-1a 0x{:016X}, "
+                             "got {} bytes/FNV-1a 0x{:016X}",
+                             ExpectedRomFsFixture.size(),
+                             ExpectedRomFsFixtureHash,
+                             report.file_size,
+                             actualHash ),
+                doggo::platform::nx::MonotonicClock::now(),
+                startedAt );
+      return false;
+    }
+
+    writeLog(
+        logger,
+        doggo::log::Level::Info,
+        "FileSystem",
+        std::format( "Validated {}: {} exact bytes, FNV-1a 0x{:016X}", RomFsFixturePath, report.file_size, actualHash ),
+        doggo::platform::nx::MonotonicClock::now(),
+        startedAt );
+    return true;
   }
 
   [[nodiscard]] bool isStickLive( const doggo::platform::nx::AnalogStickPosition & stick ) noexcept
@@ -439,6 +563,12 @@ namespace doggo::platform::nx
 
     int exitCode = EXIT_SUCCESS;
 
+    RomFs romFs;
+    if ( !isValidRomFsFixture( logger, romFs, startedAt ) )
+    {
+      exitCode = EXIT_FAILURE;
+    }
+
     if ( R_FAILED( lifecycleResult ) )
     {
       writeLog( logger,
@@ -648,6 +778,18 @@ namespace doggo::platform::nx
       {
         exitCode = EXIT_FAILURE;
       }
+    }
+
+    const std::uint32_t romFsFinalizeResult = romFs.finalize();
+    if ( R_FAILED( romFsFinalizeResult ) )
+    {
+      writeLog( logger,
+                log::Level::Error,
+                "FileSystem",
+                std::format( "ROMFS unmount failed: {}", formatResult( romFsFinalizeResult ) ),
+                MonotonicClock::now(),
+                startedAt );
+      exitCode = EXIT_FAILURE;
     }
 
     writeLog( logger,

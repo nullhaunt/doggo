@@ -6,6 +6,7 @@ add_library(doggo_platform_nx STATIC
         nx_LogSinks.cpp
         nx_Memory.cpp
         nx_MonotonicClock.cpp
+        nx_RomFs.cpp
 )
 
 add_library(doggo::platform::nx ALIAS doggo_platform_nx)

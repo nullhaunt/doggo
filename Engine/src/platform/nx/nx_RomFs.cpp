@@ -54,7 +54,7 @@ namespace doggo::platform::nx
       return report;
     }
 
-    if ( path == nullptr || path[ 0 ] == '\0' )
+    if ( !path || path[ 0 ] == '\0' )
     {
       report.status       = RomFsReadStatus::InvalidArgument;
       report.error_number = EINVAL;

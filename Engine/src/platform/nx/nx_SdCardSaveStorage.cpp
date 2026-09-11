@@ -1,4 +1,4 @@
-#include "doggo/platform/nx/nx_ApplicationStorage.hpp"
+#include "doggo/platform/nx/nx_SdCardSaveStorage.hpp"
 
 #include <switch.h>
 
@@ -20,8 +20,8 @@ namespace
   constexpr std::string_view TemporarySuffix   = ".tmp";
   constexpr std::string_view BackupSuffix      = ".bak";
 
-  using Report = doggo::platform::nx::ApplicationStorageReport;
-  using Status = doggo::platform::nx::ApplicationStorageStatus;
+  using Report = doggo::save::SaveStorageReport;
+  using Status = doggo::save::SaveStorageStatus;
   using Path   = std::array<char, FS_MAX_PATH>;
 
   [[nodiscard]] constexpr Result invariantFailure() noexcept
@@ -212,19 +212,19 @@ namespace
 
 namespace doggo::platform::nx
 {
-  ApplicationStorage::~ApplicationStorage()
+  SdCardSaveStorage::~SdCardSaveStorage()
   {
     static_cast<void>( finalize() );
   }
 
-  std::uint32_t ApplicationStorage::initialize() noexcept
+  std::uint32_t SdCardSaveStorage::initialize() noexcept
   {
     if ( mIsInitialized )
     {
       return 0;
     }
 
-    if ( fsdevGetDeviceFileSystem( DeviceName ) == nullptr )
+    if ( !fsdevGetDeviceFileSystem( DeviceName ) )
     {
       const Result result = fsdevMountSdmc();
       if ( R_FAILED( result ) )
@@ -235,7 +235,7 @@ namespace doggo::platform::nx
       mOwnsMount = true;
     }
 
-    if ( fsdevGetDeviceFileSystem( DeviceName ) == nullptr )
+    if ( !fsdevGetDeviceFileSystem( DeviceName ) )
     {
       if ( mOwnsMount )
       {
@@ -250,7 +250,7 @@ namespace doggo::platform::nx
     return 0;
   }
 
-  std::uint32_t ApplicationStorage::finalize() noexcept
+  std::uint32_t SdCardSaveStorage::finalize() noexcept
   {
     if ( !mIsInitialized )
     {
@@ -267,11 +267,11 @@ namespace doggo::platform::nx
     return 0;
   }
 
-  ApplicationStorageReport ApplicationStorage::readCommittedFile( const std::string_view name,
-                                                                  const std::span<std::uint8_t>
-                                                                      destination ) noexcept
+  save::SaveStorageReport SdCardSaveStorage::readCommittedFile( const std::string_view name,
+                                                                const std::span<std::uint8_t>
+                                                                    destination ) noexcept
   {
-    ApplicationStorageReport report;
+    save::SaveStorageReport report;
     if ( !mIsInitialized )
     {
       return report;
@@ -295,7 +295,7 @@ namespace doggo::platform::nx
 
     if ( !finalExists )
     {
-      report.status        = ApplicationStorageStatus::NotFound;
+      report.status        = save::SaveStorageStatus::NotFound;
       report.native_result = fsdevGetLastResult();
       report.error_number  = ENOENT;
       return report;
@@ -304,21 +304,21 @@ namespace doggo::platform::nx
     const int file = ::open( finalPath.data(), O_RDONLY );
     if ( file < 0 )
     {
-      setPosixFailure( report, ApplicationStorageStatus::OpenFailed, errno );
+      setPosixFailure( report, save::SaveStorageStatus::OpenFailed, errno );
       return report;
     }
 
     struct stat fileStatus = {};
     if ( fstat( file, &fileStatus ) != 0 )
     {
-      setPosixFailure( report, ApplicationStorageStatus::StatFailed, errno );
+      setPosixFailure( report, save::SaveStorageStatus::StatFailed, errno );
       static_cast<void>( ::close( file ) );
       return report;
     }
 
     if ( fileStatus.st_size < 0 )
     {
-      report.status       = ApplicationStorageStatus::StatFailed;
+      report.status       = save::SaveStorageStatus::StatFailed;
       report.error_number = EIO;
       static_cast<void>( ::close( file ) );
       return report;
@@ -327,13 +327,13 @@ namespace doggo::platform::nx
     report.file_size = static_cast<std::size_t>( fileStatus.st_size );
     if ( report.file_size > destination.size() )
     {
-      report.status       = ApplicationStorageStatus::DestinationTooSmall;
+      report.status       = save::SaveStorageStatus::DestinationTooSmall;
       report.error_number = EOVERFLOW;
       static_cast<void>( ::close( file ) );
       return report;
     }
 
-    report.status = ApplicationStorageStatus::Success;
+    report.status = save::SaveStorageStatus::Success;
     while ( report.bytes_transferred < report.file_size )
     {
       const ssize_t readSize =
@@ -345,13 +345,13 @@ namespace doggo::platform::nx
           continue;
         }
 
-        setPosixFailure( report, ApplicationStorageStatus::ReadFailed, errno );
+        setPosixFailure( report, save::SaveStorageStatus::ReadFailed, errno );
         break;
       }
 
       if ( readSize == 0 )
       {
-        report.status       = ApplicationStorageStatus::ReadFailed;
+        report.status       = save::SaveStorageStatus::ReadFailed;
         report.error_number = EIO;
         break;
       }
@@ -359,19 +359,19 @@ namespace doggo::platform::nx
       report.bytes_transferred += static_cast<std::size_t>( readSize );
     }
 
-    if ( close( file ) != 0 && report.status == ApplicationStorageStatus::Success )
+    if ( close( file ) != 0 && report.status == save::SaveStorageStatus::Success )
     {
-      setPosixFailure( report, ApplicationStorageStatus::CloseFailed, errno );
+      setPosixFailure( report, save::SaveStorageStatus::CloseFailed, errno );
     }
 
     return report;
   }
 
-  ApplicationStorageReport ApplicationStorage::writeCommittedFile( const std::string_view name,
-                                                                   const std::span<const std::uint8_t>
-                                                                       source ) noexcept
+  save::SaveStorageReport SdCardSaveStorage::writeCommittedFile( const std::string_view name,
+                                                                 const std::span<const std::uint8_t>
+                                                                     source ) noexcept
   {
-    ApplicationStorageReport report;
+    save::SaveStorageReport report;
     report.file_size = source.size();
     if ( !mIsInitialized )
     {
@@ -430,11 +430,11 @@ namespace doggo::platform::nx
     const int file = open( temporaryPath.data(), O_WRONLY | O_CREAT | O_TRUNC, 0666 );
     if ( file < 0 )
     {
-      setPosixFailure( report, ApplicationStorageStatus::OpenFailed, errno );
+      setPosixFailure( report, save::SaveStorageStatus::OpenFailed, errno );
       return report;
     }
 
-    report.status = ApplicationStorageStatus::Success;
+    report.status = save::SaveStorageStatus::Success;
     while ( report.bytes_transferred < source.size() )
     {
       const ssize_t writeSize =
@@ -446,13 +446,13 @@ namespace doggo::platform::nx
           continue;
         }
 
-        setPosixFailure( report, ApplicationStorageStatus::WriteFailed, errno );
+        setPosixFailure( report, save::SaveStorageStatus::WriteFailed, errno );
         break;
       }
 
       if ( writeSize == 0 )
       {
-        report.status       = ApplicationStorageStatus::WriteFailed;
+        report.status       = save::SaveStorageStatus::WriteFailed;
         report.error_number = EIO;
         break;
       }
@@ -460,17 +460,17 @@ namespace doggo::platform::nx
       report.bytes_transferred += static_cast<std::size_t>( writeSize );
     }
 
-    if ( report.status == ApplicationStorageStatus::Success && fsync( file ) != 0 )
+    if ( report.status == save::SaveStorageStatus::Success && fsync( file ) != 0 )
     {
-      setPosixFailure( report, ApplicationStorageStatus::FlushFailed, errno );
+      setPosixFailure( report, save::SaveStorageStatus::FlushFailed, errno );
     }
 
-    if ( close( file ) != 0 && report.status == ApplicationStorageStatus::Success )
+    if ( close( file ) != 0 && report.status == save::SaveStorageStatus::Success )
     {
-      setPosixFailure( report, ApplicationStorageStatus::CloseFailed, errno );
+      setPosixFailure( report, save::SaveStorageStatus::CloseFailed, errno );
     }
 
-    if ( report.status != ApplicationStorageStatus::Success || !commitDevice( report ) )
+    if ( report.status != save::SaveStorageStatus::Success || !commitDevice( report ) )
     {
       return report;
     }
@@ -480,7 +480,7 @@ namespace doggo::platform::nx
     {
       if ( rename( finalPath.data(), backupPath.data() ) != 0 )
       {
-        setPosixFailure( report, ApplicationStorageStatus::RenameFailed, errno );
+        setPosixFailure( report, save::SaveStorageStatus::RenameFailed, errno );
         return report;
       }
 
@@ -493,8 +493,8 @@ namespace doggo::platform::nx
 
     if ( rename( temporaryPath.data(), finalPath.data() ) != 0 )
     {
-      setPosixFailure( report, ApplicationStorageStatus::RenameFailed, errno );
-      const ApplicationStorageReport promotionFailure = report;
+      setPosixFailure( report, save::SaveStorageStatus::RenameFailed, errno );
+      const save::SaveStorageReport promotionFailure = report;
       if ( wasRotated && rename( backupPath.data(), finalPath.data() ) == 0 )
       {
         static_cast<void>( fsdevCommitDevice( DeviceName ) );
@@ -518,21 +518,21 @@ namespace doggo::platform::nx
       }
     }
 
-    report.status = ApplicationStorageStatus::Success;
+    report.status = save::SaveStorageStatus::Success;
     return report;
   }
 
-  std::string_view ApplicationStorage::backendName() const noexcept
+  std::string_view SdCardSaveStorage::backendName() const noexcept
   {
     return StorageBackend;
   }
 
-  std::string_view ApplicationStorage::rootPath() const noexcept
+  std::string_view SdCardSaveStorage::rootPath() const noexcept
   {
     return StorageRootPath;
   }
 
-  bool ApplicationStorage::isInitialized() const noexcept
+  bool SdCardSaveStorage::isInitialized() const noexcept
   {
     return mIsInitialized;
   }

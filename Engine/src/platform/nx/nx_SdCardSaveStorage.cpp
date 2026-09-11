@@ -279,6 +279,7 @@ namespace doggo::platform::nx
 
     Path finalPath  = {};
     Path backupPath = {};
+
     if ( !makePath( name, {}, finalPath, report ) || !makePath( name, BackupSuffix, backupPath, report ) )
     {
       return report;
@@ -286,6 +287,7 @@ namespace doggo::platform::nx
 
     bool finalExists  = false;
     bool backupExists = false;
+
     if ( !pathExists( finalPath.data(), finalExists, report ) ||
          !pathExists( backupPath.data(), backupExists, report ) ||
          !restoreBackupIfRequired( finalPath.data(), backupPath.data(), finalExists, backupExists, report ) )
@@ -373,6 +375,7 @@ namespace doggo::platform::nx
   {
     save::SaveStorageReport report;
     report.file_size = source.size();
+
     if ( !mIsInitialized )
     {
       return report;
@@ -381,6 +384,7 @@ namespace doggo::platform::nx
     Path finalPath     = {};
     Path temporaryPath = {};
     Path backupPath    = {};
+
     if ( !makePath( name, {}, finalPath, report ) ||
          !makePath( name, TemporarySuffix, temporaryPath, report ) ||
          !makePath( name, BackupSuffix, backupPath, report ) )
@@ -403,6 +407,7 @@ namespace doggo::platform::nx
     bool finalExists     = false;
     bool temporaryExists = false;
     bool backupExists    = false;
+
     if ( !pathExists( finalPath.data(), finalExists, report ) ||
          !pathExists( temporaryPath.data(), temporaryExists, report ) ||
          !pathExists( backupPath.data(), backupExists, report ) ||

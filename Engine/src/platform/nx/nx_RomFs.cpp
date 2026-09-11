@@ -100,7 +100,7 @@ namespace doggo::platform::nx
     while ( report.bytes_read < report.file_size )
     {
       const ssize_t readSize =
-          ::read( file, destination.data() + report.bytes_read, report.file_size - report.bytes_read );
+          read( file, destination.data() + report.bytes_read, report.file_size - report.bytes_read );
       if ( readSize < 0 )
       {
         if ( errno == EINTR )
@@ -123,7 +123,7 @@ namespace doggo::platform::nx
       report.bytes_read += static_cast<std::size_t>( readSize );
     }
 
-    if ( ::close( file ) != 0 && report.status == RomFsReadStatus::Success )
+    if ( close( file ) != 0 && report.status == RomFsReadStatus::Success )
     {
       report.status       = RomFsReadStatus::CloseFailed;
       report.error_number = errno;

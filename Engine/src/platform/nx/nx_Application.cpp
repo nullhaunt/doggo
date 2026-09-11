@@ -1,6 +1,7 @@
 #include "doggo/platform/nx/nx_Application.hpp"
 
 #include "doggo/gpu/deko/deko_GraphicsContext.hpp"
+#include "doggo/gpu/deko/deko_GraphicsProgram.hpp"
 #include "doggo/gpu/deko/deko_Presenter.hpp"
 #include "doggo/log/log_Log.hpp"
 #include "doggo/platform/nx/nx_AppletLifecycle.hpp"
@@ -28,16 +29,19 @@
 
 namespace
 {
-  constexpr double        BytesPerMebibyte          = 1024.0 * 1024.0;
-  constexpr double        MillisecondsPerSecond     = 1'000.0;
-  constexpr double        NanosecondsPerMillisecond = 1'000'000.0;
-  constexpr std::int32_t  StickDirectionThreshold   = JOYSTICK_MAX / 4;
-  constexpr auto          AudioTelemetryInterval    = std::chrono::seconds( 5 );
-  constexpr char          RomFsFixturePath[]        = "romfs:/gate0/read_fixture.bin";
-  constexpr std::uint32_t HandheldWidth             = 1280;
-  constexpr std::uint32_t HandheldHeight            = 720;
-  constexpr std::uint32_t DockedWidth               = 1920;
-  constexpr std::uint32_t DockedHeight              = 1080;
+  constexpr double        BytesPerMebibyte             = 1024.0 * 1024.0;
+  constexpr double        MillisecondsPerSecond        = 1'000.0;
+  constexpr double        NanosecondsPerMillisecond    = 1'000'000.0;
+  constexpr std::int32_t  StickDirectionThreshold      = JOYSTICK_MAX / 4;
+  constexpr auto          AudioTelemetryInterval       = std::chrono::seconds( 5 );
+  constexpr char          RomFsFixturePath[]           = "romfs:/gate0/read_fixture.bin";
+  constexpr char          TriangleVertexShaderPath[]   = "romfs:/shaders/gate0/doggo_gate0_triangle_vsh.dksh";
+  constexpr char          TriangleFragmentShaderPath[] = "romfs:/shaders/gate0/doggo_gate0_triangle_fsh.dksh";
+  constexpr std::size_t   Gate0ShaderBinaryCapacity    = static_cast<const std::size_t>( 64u * 1024u );
+  constexpr std::uint32_t HandheldWidth                = 1280;
+  constexpr std::uint32_t HandheldHeight               = 720;
+  constexpr std::uint32_t DockedWidth                  = 1920;
+  constexpr std::uint32_t DockedHeight                 = 1080;
 
   constexpr std::array<std::uint8_t, 64> ExpectedRomFsFixture = {
       0x44, 0x4F, 0x47, 0x47, 0x4F, 0x52, 0x46, 0x53, 0x01, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00,
@@ -191,7 +195,8 @@ namespace
   }
 
   [[nodiscard]] doggo::gpu::deko::PresentationReport
-  renderClearFrame( doggo::gpu::deko::Presenter & presenter ) noexcept
+  renderTriangleFrame( doggo::gpu::deko::Presenter &             presenter,
+                       const doggo::gpu::deko::GraphicsProgram & graphicsProgram ) noexcept
   {
     doggo::gpu::deko::PresentationFrame  frame;
     doggo::gpu::deko::PresentationReport report = presenter.beginFrame( frame );
@@ -216,6 +221,14 @@ namespace
         0,
         DkScissor{ .x = 0, .y = 0, .width = frame.extent.width, .height = frame.extent.height } );
     frame.command_buffer.clearColor( 0, DkColorMask_RGBA, 0.5f, 0.5f, 0.5f, 1.0f );
+
+    graphicsProgram.bind( frame.command_buffer );
+    dk::RasterizerState rasterizerState;
+    rasterizerState.setCullMode( DkFace_None );
+    frame.command_buffer.bindRasterizerState( rasterizerState );
+    frame.command_buffer.bindColorState( dk::ColorState{} );
+    frame.command_buffer.bindColorWriteState( dk::ColorWriteState{} );
+    frame.command_buffer.draw( DkPrimitive_Triangles, 3, 1, 0, 0 );
     return presenter.endFrame();
   }
 
@@ -237,6 +250,7 @@ namespace
 
     std::array<std::uint8_t, ExpectedRomFsFixture.size()> fixtureBytes = {};
     const doggo::platform::nx::RomFsReadReport            report = romFs.readFile( RomFsFixturePath, fixtureBytes );
+
     if ( report.status != doggo::platform::nx::RomFsReadStatus::Success )
     {
       writeLog( logger,
@@ -256,6 +270,7 @@ namespace
     const bool          isExactSize  = report.file_size == ExpectedRomFsFixture.size();
     const bool          isExactBytes = isExactSize && fixtureBytes == ExpectedRomFsFixture;
     const bool          isExactHash  = actualHash == ExpectedRomFsFixtureHash;
+
     if ( !isExactBytes || !isExactHash )
     {
       writeLog( logger,
@@ -279,6 +294,91 @@ namespace
         std::format( "Validated {}: {} exact bytes, FNV-1a 0x{:016X}", RomFsFixturePath, report.file_size, actualHash ),
         doggo::platform::nx::MonotonicClock::now(),
         startedAt );
+    return true;
+  }
+
+  [[nodiscard]] bool readShaderBinary( doggo::log::Logger &                                  logger,
+                                       const doggo::platform::nx::RomFs &                    romFs,
+                                       const char * const                                    path,
+                                       const std::span<std::uint8_t>                         destination,
+                                       std::size_t &                                         binarySize,
+                                       const doggo::platform::nx::MonotonicClock::time_point startedAt )
+  {
+    const doggo::platform::nx::RomFsReadReport report = romFs.readFile( path, destination );
+    if ( report.status != doggo::platform::nx::RomFsReadStatus::Success )
+    {
+      writeLog( logger,
+                doggo::log::Level::Error,
+                "GPU",
+                std::format( "Shader read failed for {}: {} (errno {}, {} of {} bytes)",
+                             path,
+                             getRomFsReadStatusName( report.status ),
+                             report.error_number,
+                             report.bytes_read,
+                             report.file_size ),
+                doggo::platform::nx::MonotonicClock::now(),
+                startedAt );
+      return false;
+    }
+
+    if ( report.bytes_read == 0 )
+    {
+      writeLog( logger,
+                doggo::log::Level::Error,
+                "GPU",
+                std::format( "Shader is empty: {}", path ),
+                doggo::platform::nx::MonotonicClock::now(),
+                startedAt );
+      return false;
+    }
+
+    binarySize = report.bytes_read;
+    return true;
+  }
+
+  [[nodiscard]] bool initializeGate0TriangleProgram( doggo::log::Logger &                logger,
+                                                     const doggo::platform::nx::RomFs &  romFs,
+                                                     doggo::gpu::deko::GraphicsProgram & graphicsProgram,
+                                                     const dk::Device                    device,
+                                                     const doggo::platform::nx::MonotonicClock::time_point startedAt )
+  {
+    std::array<std::uint8_t, Gate0ShaderBinaryCapacity> vertexBinary   = {};
+    std::array<std::uint8_t, Gate0ShaderBinaryCapacity> fragmentBinary = {};
+    std::size_t                                         vertexSize     = 0;
+    std::size_t                                         fragmentSize   = 0;
+
+    if ( !readShaderBinary( logger, romFs, TriangleVertexShaderPath, vertexBinary, vertexSize, startedAt ) ||
+         !readShaderBinary( logger, romFs, TriangleFragmentShaderPath, fragmentBinary, fragmentSize, startedAt ) )
+    {
+      return false;
+    }
+
+    const doggo::gpu::deko::GraphicsProgramStatus status =
+        graphicsProgram.initialize( device,
+                                    std::span<const std::uint8_t>{ vertexBinary.data(), vertexSize },
+                                    std::span<const std::uint8_t>{ fragmentBinary.data(), fragmentSize } );
+    if ( status != doggo::gpu::deko::GraphicsProgramStatus::Success )
+    {
+      writeLog( logger,
+                doggo::log::Level::Error,
+                "GPU",
+                std::format( "Triangle graphics program initialization failed: {}",
+                             doggo::gpu::deko::getGraphicsProgramStatusName( status ) ),
+                doggo::platform::nx::MonotonicClock::now(),
+                startedAt );
+      return false;
+    }
+
+    writeLog( logger,
+              doggo::log::Level::Info,
+              "GPU",
+              std::format( "Triangle graphics program initialized: {}-byte vertex DKSH, "
+                           "{}-byte fragment DKSH, {}-byte code block",
+                           vertexSize,
+                           fragmentSize,
+                           graphicsProgram.codeMemorySize() ),
+              doggo::platform::nx::MonotonicClock::now(),
+              startedAt );
     return true;
   }
 
@@ -458,6 +558,7 @@ namespace
     const std::uint64_t buttonsHeld = input.buttons_held & ~StickPseudoButtonMask;
     const std::uint64_t buttonsDown = input.buttons_down & ~StickPseudoButtonMask;
     const std::uint64_t buttonsUp   = input.buttons_up & ~StickPseudoButtonMask;
+
     if ( buttonsDown != 0 || buttonsUp != 0 )
     {
       writeLog( logger,
@@ -754,6 +855,7 @@ namespace doggo::platform::nx
 
     gpu::deko::GraphicsContext             graphicsContext;
     const gpu::deko::GraphicsContextStatus graphicsStatus = graphicsContext.initialize( logger );
+    gpu::deko::GraphicsProgram             triangleProgram;
     gpu::deko::Presenter                   presenter;
     gpu::deko::PresentationReport          presentationReport = {
                  .status = gpu::deko::PresentationStatus::NotInitialized,
@@ -834,6 +936,11 @@ namespace doggo::platform::nx
     {
       exitCode = EXIT_FAILURE;
     }
+    else if ( graphicsStatus == gpu::deko::GraphicsContextStatus::Success &&
+              !initializeGate0TriangleProgram( logger, romFs, triangleProgram, graphicsContext.device(), startedAt ) )
+    {
+      exitCode = EXIT_FAILURE;
+    }
 
     SdCardSaveStorage storage;
     if ( !isValidCommittedSaveFixture( logger, storage, startedAt ) )
@@ -911,7 +1018,7 @@ namespace doggo::platform::nx
 
     MonotonicClock::time_point previousTime       = startedAt;
     MonotonicClock::time_point nextAudioTelemetry = startedAt + AudioTelemetryInterval;
-    bool                       isRunning          = presenter.isInitialized();
+    bool                       isRunning          = presenter.isInitialized() && triangleProgram.isInitialized();
     AppletFocusState           focusState         = AppletFocusState_InFocus;
     InputTelemetryState        inputTelemetry;
     AudrenTelemetry            previousAudioTelemetry = audio.telemetry();
@@ -1003,7 +1110,7 @@ namespace doggo::platform::nx
         break;
       }
 
-      const gpu::deko::PresentationReport frameReport = renderClearFrame( presenter );
+      const gpu::deko::PresentationReport frameReport = renderTriangleFrame( presenter, triangleProgram );
       if ( frameReport.status != gpu::deko::PresentationStatus::Success )
       {
         writeLog( logger,
@@ -1069,6 +1176,7 @@ namespace doggo::platform::nx
 
     const bool                          wasPresentationInitialized = presenter.isInitialized();
     const gpu::deko::PresentationReport presentationFinalizeReport = presenter.finalize();
+
     if ( presentationFinalizeReport.status != gpu::deko::PresentationStatus::Success )
     {
       writeLog( logger,
@@ -1092,8 +1200,22 @@ namespace doggo::platform::nx
                 startedAt );
     }
 
+    const bool wasTriangleProgramInitialized = triangleProgram.isInitialized();
+    triangleProgram.finalize();
+
+    if ( wasTriangleProgramInitialized )
+    {
+      writeLog( logger,
+                log::Level::Info,
+                "GPU",
+                "Triangle graphics program finalized",
+                MonotonicClock::now(),
+                startedAt );
+    }
+
     const bool wasGraphicsInitialized = graphicsContext.isInitialized();
     graphicsContext.finalize();
+
     if ( wasGraphicsInitialized )
     {
       writeLog( logger,

@@ -1,5 +1,6 @@
 add_library(doggo_gpu_deko STATIC
         deko_GraphicsContext.cpp
+        deko_GraphicsProgram.cpp
         deko_Presenter.cpp
 )
 

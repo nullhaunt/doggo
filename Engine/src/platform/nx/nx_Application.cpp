@@ -1,6 +1,7 @@
 #include "doggo/platform/nx/nx_Application.hpp"
 
 #include "doggo/gpu/deko/deko_GraphicsContext.hpp"
+#include "doggo/gpu/deko/deko_Presenter.hpp"
 #include "doggo/log/log_Log.hpp"
 #include "doggo/platform/nx/nx_AppletLifecycle.hpp"
 #include "doggo/platform/nx/nx_AudrenTone.hpp"
@@ -27,12 +28,16 @@
 
 namespace
 {
-  constexpr double       BytesPerMebibyte          = 1024.0 * 1024.0;
-  constexpr double       MillisecondsPerSecond     = 1'000.0;
-  constexpr double       NanosecondsPerMillisecond = 1'000'000.0;
-  constexpr std::int32_t StickDirectionThreshold   = JOYSTICK_MAX / 4;
-  constexpr auto         AudioTelemetryInterval    = std::chrono::seconds( 5 );
-  constexpr char         RomFsFixturePath[]        = "romfs:/gate0/read_fixture.bin";
+  constexpr double        BytesPerMebibyte          = 1024.0 * 1024.0;
+  constexpr double        MillisecondsPerSecond     = 1'000.0;
+  constexpr double        NanosecondsPerMillisecond = 1'000'000.0;
+  constexpr std::int32_t  StickDirectionThreshold   = JOYSTICK_MAX / 4;
+  constexpr auto          AudioTelemetryInterval    = std::chrono::seconds( 5 );
+  constexpr char          RomFsFixturePath[]        = "romfs:/gate0/read_fixture.bin";
+  constexpr std::uint32_t HandheldWidth             = 1280;
+  constexpr std::uint32_t HandheldHeight            = 720;
+  constexpr std::uint32_t DockedWidth               = 1920;
+  constexpr std::uint32_t DockedHeight              = 1080;
 
   constexpr std::array<std::uint8_t, 64> ExpectedRomFsFixture = {
       0x44, 0x4F, 0x47, 0x47, 0x4F, 0x52, 0x46, 0x53, 0x01, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00,
@@ -183,6 +188,35 @@ namespace
                  const doggo::platform::nx::MonotonicClock::time_point startedAt ) noexcept
   {
     logger.write( level, category, message, elapsedSince( timestamp, startedAt ) );
+  }
+
+  [[nodiscard]] doggo::gpu::deko::PresentationReport
+  renderClearFrame( doggo::gpu::deko::Presenter & presenter ) noexcept
+  {
+    doggo::gpu::deko::PresentationFrame  frame;
+    doggo::gpu::deko::PresentationReport report = presenter.beginFrame( frame );
+
+    if ( report.status != doggo::gpu::deko::PresentationStatus::Success )
+    {
+      return report;
+    }
+
+    const dk::ImageView colorTarget{ *frame.color_image };
+    frame.command_buffer.bindRenderTargets( &colorTarget );
+    frame.command_buffer.setViewports( 0,
+                                       DkViewport{
+                                           .x      = 0.0f,
+                                           .y      = 0.0f,
+                                           .width  = static_cast<float>( frame.extent.width ),
+                                           .height = static_cast<float>( frame.extent.height ),
+                                           .near   = 0.0f,
+                                           .far    = 1.0f,
+                                       } );
+    frame.command_buffer.setScissors(
+        0,
+        DkScissor{ .x = 0, .y = 0, .width = frame.extent.width, .height = frame.extent.height } );
+    frame.command_buffer.clearColor( 0, DkColorMask_RGBA, 0.5f, 0.5f, 0.5f, 1.0f );
+    return presenter.endFrame();
   }
 
   [[nodiscard]] bool isValidRomFsFixture( doggo::log::Logger &                                  logger,
@@ -492,6 +526,16 @@ namespace
     }
   }
 
+  [[nodiscard]] doggo::gpu::deko::PresentationExtent getInitialPresentationExtent() noexcept
+  {
+    if ( appletGetOperationMode() == AppletOperationMode_Console )
+    {
+      return { .width = DockedWidth, .height = DockedHeight };
+    }
+
+    return { .width = HandheldWidth, .height = HandheldHeight };
+  }
+
   [[nodiscard]] const char * getPerformanceModeName( const std::int32_t mode ) noexcept
   {
     switch ( static_cast<ApmPerformanceMode>( mode ) )
@@ -676,21 +720,10 @@ namespace doggo::platform::nx
 {
   int Application::run()
   {
-    if ( !consoleInit( nullptr ) )
-    {
-      return EXIT_FAILURE;
-    }
-
     const MonotonicClock::time_point startedAt = MonotonicClock::now();
 
     log::Logger     logger;
-    ConsoleLogSink  consoleSink;
     DoggoDevLogSink doggoDevSink;
-    if ( !logger.attach( consoleSink ) )
-    {
-      consoleExit( nullptr );
-      return EXIT_FAILURE;
-    }
 
     const bool isDoggoDevConnected = doggoDevSink.initialize() && logger.attach( doggoDevSink );
     if ( isDoggoDevConnected )
@@ -721,6 +754,19 @@ namespace doggo::platform::nx
 
     gpu::deko::GraphicsContext             graphicsContext;
     const gpu::deko::GraphicsContextStatus graphicsStatus = graphicsContext.initialize( logger );
+    gpu::deko::Presenter                   presenter;
+    gpu::deko::PresentationReport          presentationReport = {
+                 .status = gpu::deko::PresentationStatus::NotInitialized,
+    };
+
+    const gpu::deko::PresentationExtent presentationExtent = getInitialPresentationExtent();
+    if ( graphicsStatus == gpu::deko::GraphicsContextStatus::Success )
+    {
+      presentationReport = presenter.initialize( graphicsContext.device(),
+                                                 graphicsContext.graphicsQueue(),
+                                                 nwindowGetDefault(),
+                                                 presentationExtent );
+    }
 
     AudrenTone          audio;
     const std::uint32_t audioResult = audio.initialize();
@@ -740,7 +786,7 @@ namespace doggo::platform::nx
       writeLog( logger,
                 log::Level::Info,
                 "GPU",
-                "deko3d device and graphics queue initialized: depth [0, 1], upper-left origin, Y-up",
+                "deko3d device and graphics queue initialized: depth [0, 1], upper-left origin",
                 MonotonicClock::now(),
                 startedAt );
     }
@@ -753,6 +799,33 @@ namespace doggo::platform::nx
           std::format( "Initialization failed: {}", doggo::gpu::deko::getGraphicsContextStatusName( graphicsStatus ) ),
           MonotonicClock::now(),
           startedAt );
+      exitCode = EXIT_FAILURE;
+    }
+
+    if ( presentationReport.status == gpu::deko::PresentationStatus::Success )
+    {
+      writeLog( logger,
+                log::Level::Info,
+                "GPU",
+                std::format( "Presentation initialized: {}x{}, {} images, {} frame contexts, swap interval {}",
+                             presentationExtent.width,
+                             presentationExtent.height,
+                             gpu::deko::Presenter::FrameCount,
+                             gpu::deko::Presenter::FrameCount,
+                             gpu::deko::Presenter::SwapInterval ),
+                MonotonicClock::now(),
+                startedAt );
+    }
+    else
+    {
+      writeLog( logger,
+                log::Level::Error,
+                "GPU",
+                std::format( "Presentation initialization failed: {} (context {})",
+                             gpu::deko::getPresentationStatusName( presentationReport.status ),
+                             presentationReport.context_index ),
+                MonotonicClock::now(),
+                startedAt );
       exitCode = EXIT_FAILURE;
     }
 
@@ -838,7 +911,7 @@ namespace doggo::platform::nx
 
     MonotonicClock::time_point previousTime       = startedAt;
     MonotonicClock::time_point nextAudioTelemetry = startedAt + AudioTelemetryInterval;
-    bool                       isRunning          = true;
+    bool                       isRunning          = presenter.isInitialized();
     AppletFocusState           focusState         = AppletFocusState_InFocus;
     InputTelemetryState        inputTelemetry;
     AudrenTelemetry            previousAudioTelemetry = audio.telemetry();
@@ -930,7 +1003,22 @@ namespace doggo::platform::nx
         break;
       }
 
-      consoleUpdate( nullptr );
+      const gpu::deko::PresentationReport frameReport = renderClearFrame( presenter );
+      if ( frameReport.status != gpu::deko::PresentationStatus::Success )
+      {
+        writeLog( logger,
+                  log::Level::Error,
+                  "GPU",
+                  std::format( "Frame presentation failed: {} (deko result {}, context {}, image {})",
+                               gpu::deko::getPresentationStatusName( frameReport.status ),
+                               static_cast<std::uint32_t>( frameReport.deko_result ),
+                               frameReport.context_index,
+                               frameReport.image_slot ),
+                  currentTime,
+                  startedAt );
+        exitCode = EXIT_FAILURE;
+        break;
+      }
     }
 
     if ( lifecycle.droppedEventCount() != 0 )
@@ -979,6 +1067,31 @@ namespace doggo::platform::nx
       }
     }
 
+    const bool                          wasPresentationInitialized = presenter.isInitialized();
+    const gpu::deko::PresentationReport presentationFinalizeReport = presenter.finalize();
+    if ( presentationFinalizeReport.status != gpu::deko::PresentationStatus::Success )
+    {
+      writeLog( logger,
+                log::Level::Error,
+                "GPU",
+                std::format( "Presentation finalization failed: {} (deko result {}, context {})",
+                             gpu::deko::getPresentationStatusName( presentationFinalizeReport.status ),
+                             static_cast<std::uint32_t>( presentationFinalizeReport.deko_result ),
+                             presentationFinalizeReport.context_index ),
+                MonotonicClock::now(),
+                startedAt );
+      exitCode = EXIT_FAILURE;
+    }
+    else if ( wasPresentationInitialized )
+    {
+      writeLog( logger,
+                log::Level::Info,
+                "GPU",
+                "Presentation images and frame contexts finalized",
+                MonotonicClock::now(),
+                startedAt );
+    }
+
     const bool wasGraphicsInitialized = graphicsContext.isInitialized();
     graphicsContext.finalize();
     if ( wasGraphicsInitialized )
@@ -1024,11 +1137,8 @@ namespace doggo::platform::nx
 
     lifecycle.finalize();
     logger.flush();
-    consoleUpdate( nullptr );
     logger.detach( doggoDevSink );
     doggoDevSink.finalize();
-    logger.detach( consoleSink );
-    consoleExit( nullptr );
     return exitCode;
   }
 }  // namespace doggo::platform::nx

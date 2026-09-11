@@ -14,6 +14,8 @@ namespace doggo::gpu::deko
   {
       std::uint32_t width  = 0;
       std::uint32_t height = 0;
+
+      constexpr bool operator==( const PresentationExtent & ) const noexcept = default;
   };
 
   enum class PresentationStatus : std::uint8_t
@@ -67,6 +69,7 @@ namespace doggo::gpu::deko
       [[nodiscard]] PresentationReport initialize( dk::Device device, dk::Queue graphicsQueue, void * nativeWindow,
                                                    PresentationExtent extent ) noexcept;
       [[nodiscard]] PresentationReport finalize() noexcept;
+      [[nodiscard]] PresentationReport resize( PresentationExtent extent ) noexcept;
 
       [[nodiscard]] PresentationReport beginFrame( PresentationFrame & frame ) noexcept;
       [[nodiscard]] PresentationReport endFrame() noexcept;
@@ -84,9 +87,14 @@ namespace doggo::gpu::deko
           bool             is_in_flight = false;
       };
 
-      void resetResources() noexcept;
+      [[nodiscard]] PresentationReport createFramebufferResources( PresentationExtent extent ) noexcept;
+      [[nodiscard]] PresentationReport waitForFrames() noexcept;
+      void                             resetFramebufferResources() noexcept;
+      void                             resetResources() noexcept;
 
+      dk::Device                           mDevice;
       dk::Queue                            mGraphicsQueue;
+      void *                               mNativeWindow = nullptr;
       dk::UniqueMemBlock                   mFramebufferMemory;
       std::array<dk::Image, FrameCount>    mFramebufferImages = {};
       dk::UniqueSwapchain                  mSwapChain;

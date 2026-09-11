@@ -117,48 +117,16 @@ namespace doggo::gpu::deko
       return makeReport( PresentationStatus::InvalidArgument );
     }
 
-    dk::ImageLayout framebufferLayout;
-    dk::ImageLayoutMaker{ device }
-        .setFlags( DkImageFlags_UsageRender | DkImageFlags_UsagePresent | DkImageFlags_HwCompression )
-        .setFormat( DkImageFormat_RGBA8_Unorm )
-        .setDimensions( extent.width, extent.height )
-        .initialize( framebufferLayout );
+    mDevice        = device;
+    mGraphicsQueue = graphicsQueue;
+    mNativeWindow  = nativeWindow;
 
-    const std::uint32_t imageAlignment =
-        std::max<std::uint32_t>( framebufferLayout.getAlignment(), DK_MEMBLOCK_ALIGNMENT );
-    std::uint64_t imageStride = 0;
-    if ( !alignUp( framebufferLayout.getSize(), imageAlignment, imageStride ) ||
-         imageStride > std::numeric_limits<std::uint32_t>::max() ||
-         imageStride > std::numeric_limits<std::uint32_t>::max() / FrameCount )
-    {
-      return makeReport( PresentationStatus::FramebufferSizeOverflow );
-    }
-
-    const auto framebufferMemorySize = static_cast<std::uint32_t>( imageStride * FrameCount );
-    mFramebufferMemory               = dk::MemBlockMaker{ device, framebufferMemorySize }
-                             .setFlags( DkMemBlockFlags_GpuCached | DkMemBlockFlags_Image )
-                             .create();
-    if ( !mFramebufferMemory )
+    const PresentationReport framebufferReport = createFramebufferResources( extent );
+    if ( framebufferReport.status != PresentationStatus::Success )
     {
       resetResources();
-      return makeReport( PresentationStatus::FramebufferMemoryCreationFailed );
+      return framebufferReport;
     }
-
-    std::array<const DkImage *, FrameCount> swapChainImages = {};
-    for ( std::size_t index = 0; index < FrameCount; ++index )
-    {
-      const auto imageOffset = static_cast<std::uint32_t>( imageStride * index );
-      mFramebufferImages[ index ].initialize( framebufferLayout, mFramebufferMemory, imageOffset );
-      swapChainImages[ index ] = &mFramebufferImages[ index ];
-    }
-
-    mSwapChain = dk::SwapchainMaker{ device, nativeWindow, swapChainImages }.create();
-    if ( !mSwapChain )
-    {
-      resetResources();
-      return makeReport( PresentationStatus::SwapChainCreationFailed );
-    }
-    mSwapChain.setSwapInterval( SwapInterval );
 
     static_assert( CommandMemoryPerFrame % DK_CMDMEM_ALIGNMENT == 0 );
     static_assert( CommandMemoryPerFrame % DK_MEMBLOCK_ALIGNMENT == 0 );
@@ -167,6 +135,7 @@ namespace doggo::gpu::deko
     mCommandMemory                            = dk::MemBlockMaker{ device, commandMemorySize }
                          .setFlags( DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached )
                          .create();
+
     if ( !mCommandMemory )
     {
       resetResources();
@@ -176,6 +145,7 @@ namespace doggo::gpu::deko
     for ( std::size_t index = 0; index < FrameCount; ++index )
     {
       FrameContext & frame = mFrames[ index ];
+
       // The fence guards both this command buffer and its fixed memory slice.
       frame.command_buffer = dk::CmdBufMaker{ device }.create();
       if ( !frame.command_buffer )
@@ -193,40 +163,55 @@ namespace doggo::gpu::deko
       frame.is_in_flight     = false;
     }
 
-    mGraphicsQueue = graphicsQueue;
-    mExtent        = extent;
     return makeReport( PresentationStatus::Success );
   }
 
   PresentationReport Presenter::finalize() noexcept
   {
-    PresentationReport report = makeReport( PresentationStatus::Success );
-
-    if ( mGraphicsQueue && mGraphicsQueue.isInErrorState() )
-    {
-      report = makeReport( PresentationStatus::QueueError );
-    }
-    else
-    {
-      for ( std::size_t index = 0; index < FrameCount; ++index )
-      {
-        FrameContext & frame = mFrames[ index ];
-        if ( !frame.is_in_flight )
-        {
-          continue;
-        }
-
-        const DkResult waitResult = frame.completion_fence.wait();
-        if ( waitResult != DkResult_Success && report.status == PresentationStatus::Success )
-        {
-          report = makeReport( PresentationStatus::FenceWaitFailed, waitResult, static_cast<std::uint32_t>( index ) );
-        }
-        frame.is_in_flight = false;
-      }
-    }
-
+    const PresentationReport report = waitForFrames();
     resetResources();
     return report;
+  }
+
+  PresentationReport Presenter::resize( const PresentationExtent extent ) noexcept
+  {
+    if ( !isInitialized() )
+    {
+      return makeReport( PresentationStatus::NotInitialized );
+    }
+
+    if ( mHasActiveFrame )
+    {
+      return makeReport( PresentationStatus::FrameAlreadyActive );
+    }
+
+    if ( extent.width == 0 || extent.height == 0 )
+    {
+      return makeReport( PresentationStatus::InvalidArgument );
+    }
+
+    if ( extent == mExtent )
+    {
+      return makeReport( PresentationStatus::Success );
+    }
+
+    const PresentationReport waitReport = waitForFrames();
+    if ( waitReport.status != PresentationStatus::Success )
+    {
+      return waitReport;
+    }
+
+    resetFramebufferResources();
+
+    const PresentationReport framebufferReport = createFramebufferResources( extent );
+    if ( framebufferReport.status != PresentationStatus::Success )
+    {
+      resetResources();
+      return framebufferReport;
+    }
+
+    mNextContextIndex = 0;
+    return makeReport( PresentationStatus::Success );
   }
 
   PresentationReport Presenter::beginFrame( PresentationFrame & frame ) noexcept
@@ -319,7 +304,7 @@ namespace doggo::gpu::deko
 
   bool Presenter::isInitialized() const noexcept
   {
-    if ( !mGraphicsQueue || !mFramebufferMemory || !mSwapChain || !mCommandMemory )
+    if ( !mDevice || !mGraphicsQueue || !mNativeWindow || !mFramebufferMemory || !mSwapChain || !mCommandMemory )
     {
       return false;
     }
@@ -336,6 +321,96 @@ namespace doggo::gpu::deko
     return mExtent;
   }
 
+  PresentationReport Presenter::createFramebufferResources( const PresentationExtent extent ) noexcept
+  {
+    dk::ImageLayout framebufferLayout;
+    dk::ImageLayoutMaker{ mDevice }
+        .setFlags( DkImageFlags_UsageRender | DkImageFlags_UsagePresent | DkImageFlags_HwCompression )
+        .setFormat( DkImageFormat_RGBA8_Unorm )
+        .setDimensions( extent.width, extent.height )
+        .initialize( framebufferLayout );
+
+    const std::uint32_t imageAlignment =
+        std::max<std::uint32_t>( framebufferLayout.getAlignment(), DK_MEMBLOCK_ALIGNMENT );
+    std::uint64_t imageStride = 0;
+    if ( !alignUp( framebufferLayout.getSize(), imageAlignment, imageStride ) ||
+         imageStride > std::numeric_limits<std::uint32_t>::max() ||
+         imageStride > std::numeric_limits<std::uint32_t>::max() / FrameCount )
+    {
+      return makeReport( PresentationStatus::FramebufferSizeOverflow );
+    }
+
+    const auto framebufferMemorySize = static_cast<std::uint32_t>( imageStride * FrameCount );
+    mFramebufferMemory               = dk::MemBlockMaker{ mDevice, framebufferMemorySize }
+                             .setFlags( DkMemBlockFlags_GpuCached | DkMemBlockFlags_Image )
+                             .create();
+    if ( !mFramebufferMemory )
+    {
+      resetFramebufferResources();
+      return makeReport( PresentationStatus::FramebufferMemoryCreationFailed );
+    }
+
+    std::array<const DkImage *, FrameCount> swapChainImages = {};
+    for ( std::size_t index = 0; index < FrameCount; ++index )
+    {
+      const auto imageOffset = static_cast<std::uint32_t>( imageStride * index );
+      mFramebufferImages[ index ].initialize( framebufferLayout, mFramebufferMemory, imageOffset );
+      swapChainImages[ index ] = &mFramebufferImages[ index ];
+    }
+
+    mSwapChain = dk::SwapchainMaker{ mDevice, mNativeWindow, swapChainImages }.create();
+    if ( !mSwapChain )
+    {
+      resetFramebufferResources();
+      return makeReport( PresentationStatus::SwapChainCreationFailed );
+    }
+
+    mSwapChain.setSwapInterval( SwapInterval );
+    mExtent = extent;
+    return makeReport( PresentationStatus::Success );
+  }
+
+  PresentationReport Presenter::waitForFrames() noexcept
+  {
+    PresentationReport report = makeReport( PresentationStatus::Success );
+
+    if ( mGraphicsQueue && mGraphicsQueue.isInErrorState() )
+    {
+      return makeReport( PresentationStatus::QueueError );
+    }
+
+    for ( std::size_t index = 0; index < FrameCount; ++index )
+    {
+      FrameContext & frame = mFrames[ index ];
+      if ( !frame.is_in_flight )
+      {
+        continue;
+      }
+
+      const DkResult waitResult = frame.completion_fence.wait();
+      if ( waitResult != DkResult_Success )
+      {
+        if ( report.status == PresentationStatus::Success )
+        {
+          report = makeReport( PresentationStatus::FenceWaitFailed, waitResult, static_cast<std::uint32_t>( index ) );
+        }
+        continue;
+      }
+
+      frame.is_in_flight = false;
+    }
+
+    return report;
+  }
+
+  void Presenter::resetFramebufferResources() noexcept
+  {
+    mSwapChain         = nullptr;
+    mFramebufferImages = {};
+    mFramebufferMemory = nullptr;
+    mExtent            = {};
+  }
+
   void Presenter::resetResources() noexcept
   {
     mHasActiveFrame     = false;
@@ -349,11 +424,12 @@ namespace doggo::gpu::deko
       frame.is_in_flight     = false;
     }
 
-    mCommandMemory     = nullptr;
-    mSwapChain         = nullptr;
-    mFramebufferMemory = nullptr;
-    mGraphicsQueue     = {};
-    mExtent            = {};
-    mNextContextIndex  = 0;
+    mCommandMemory = nullptr;
+    resetFramebufferResources();
+
+    mDevice           = {};
+    mGraphicsQueue    = {};
+    mNativeWindow     = nullptr;
+    mNextContextIndex = 0;
   }
 }  // namespace doggo::gpu::deko

@@ -627,9 +627,10 @@ namespace
     }
   }
 
-  [[nodiscard]] doggo::gpu::deko::PresentationExtent getInitialPresentationExtent() noexcept
+  [[nodiscard]] doggo::gpu::deko::PresentationExtent
+  getPresentationExtent( const AppletOperationMode operationMode ) noexcept
   {
-    if ( appletGetOperationMode() == AppletOperationMode_Console )
+    if ( operationMode == AppletOperationMode_Console )
     {
       return { .width = DockedWidth, .height = DockedHeight };
     }
@@ -861,7 +862,7 @@ namespace doggo::platform::nx
                  .status = gpu::deko::PresentationStatus::NotInitialized,
     };
 
-    const gpu::deko::PresentationExtent presentationExtent = getInitialPresentationExtent();
+    const gpu::deko::PresentationExtent presentationExtent = getPresentationExtent( appletGetOperationMode() );
     if ( graphicsStatus == gpu::deko::GraphicsContextStatus::Success )
     {
       presentationReport = presenter.initialize( graphicsContext.device(),
@@ -1016,12 +1017,13 @@ namespace doggo::platform::nx
               MonotonicClock::now(),
               startedAt );
 
-    MonotonicClock::time_point previousTime       = startedAt;
-    MonotonicClock::time_point nextAudioTelemetry = startedAt + AudioTelemetryInterval;
-    bool                       isRunning          = presenter.isInitialized() && triangleProgram.isInitialized();
-    AppletFocusState           focusState         = AppletFocusState_InFocus;
-    InputTelemetryState        inputTelemetry;
-    AudrenTelemetry            previousAudioTelemetry = audio.telemetry();
+    MonotonicClock::time_point    previousTime       = startedAt;
+    MonotonicClock::time_point    nextAudioTelemetry = startedAt + AudioTelemetryInterval;
+    bool                          isRunning          = presenter.isInitialized() && triangleProgram.isInitialized();
+    AppletFocusState              focusState         = AppletFocusState_InFocus;
+    gpu::deko::PresentationExtent requestedPresentationExtent = presentationExtent;
+    InputTelemetryState           inputTelemetry;
+    AudrenTelemetry               previousAudioTelemetry = audio.telemetry();
 
     while ( isRunning )
     {
@@ -1034,6 +1036,15 @@ namespace doggo::platform::nx
         {
           focusState = static_cast<AppletFocusState>( lifecycleEvent.detail );
           audio.requestPause( focusState != AppletFocusState_InFocus );
+        }
+        else if ( lifecycleEvent.type == AppletLifecycleEventType::OperationModeChanged )
+        {
+          requestedPresentationExtent =
+              getPresentationExtent( static_cast<AppletOperationMode>( lifecycleEvent.detail ) );
+        }
+        else if ( lifecycleEvent.type == AppletLifecycleEventType::Resumed )
+        {
+          requestedPresentationExtent = getPresentationExtent( appletGetOperationMode() );
         }
 
         logLifecycleEvent( logger, lifecycleEvent, startedAt );
@@ -1072,6 +1083,42 @@ namespace doggo::platform::nx
         }
 
         continue;
+      }
+
+      if ( requestedPresentationExtent != presenter.extent() )
+      {
+        const gpu::deko::PresentationExtent previousExtent = presenter.extent();
+        const gpu::deko::PresentationReport resizeReport   = presenter.resize( requestedPresentationExtent );
+
+        if ( resizeReport.status != gpu::deko::PresentationStatus::Success )
+        {
+          writeLog( logger,
+                    log::Level::Error,
+                    "GPU",
+                    std::format( "Presentation resize failed: {}x{} -> {}x{}: {} (deko result {}, context {})",
+                                 previousExtent.width,
+                                 previousExtent.height,
+                                 requestedPresentationExtent.width,
+                                 requestedPresentationExtent.height,
+                                 gpu::deko::getPresentationStatusName( resizeReport.status ),
+                                 static_cast<std::uint32_t>( resizeReport.deko_result ),
+                                 resizeReport.context_index ),
+                    currentTime,
+                    startedAt );
+          exitCode = EXIT_FAILURE;
+          break;
+        }
+
+        writeLog( logger,
+                  log::Level::Info,
+                  "GPU",
+                  std::format( "Presentation resized: {}x{} -> {}x{}",
+                               previousExtent.width,
+                               previousExtent.height,
+                               requestedPresentationExtent.width,
+                               requestedPresentationExtent.height ),
+                  currentTime,
+                  startedAt );
       }
 
       const InputSnapshot & inputSnapshot = input.update();

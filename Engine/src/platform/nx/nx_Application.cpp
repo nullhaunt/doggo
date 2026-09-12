@@ -874,7 +874,7 @@ namespace doggo::platform::nx
     AudrenTone          audio;
     const std::uint32_t audioResult = audio.initialize();
 
-    writeLog( logger, log::Level::Info, "Startup", "DOGGO Gate 0 - Platform Proof", startedAt, startedAt );
+    writeLog( logger, log::Level::Info, "Startup", "DOGGO Gate 1 - GPU & Asset Proof", startedAt, startedAt );
     writeLog( logger,
               log::Level::Info,
               "Timing",

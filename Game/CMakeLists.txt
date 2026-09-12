@@ -58,16 +58,42 @@ target_link_libraries(${APP_TARGET}
         doggo::platform::nx
 )
 
-set(GATE0_SHADER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../Content/shaders/gate0")
+get_filename_component(DOGGO_WORKSPACE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+include("${DOGGO_WORKSPACE_ROOT}/cmake/DoggoShaderCooking.cmake")
 
-nx_add_shader_program(doggo_gate0_triangle_vsh
-        "${GATE0_SHADER_SOURCE_DIR}/gate0_triangle_vsh.glsl"
-        vert
+set(DOGGO_SHADER_ABI "${DOGGO_WORKSPACE_ROOT}/Content/shaders/doggo_shader_abi.dsa")
+set(GATE0_SHADER_SOURCE_DIR "${DOGGO_WORKSPACE_ROOT}/Content/shaders/gate0")
+set(GATE0_SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/cooked/shaders/gate0")
+set(DOGGO_GENERATED_INCLUDE_DIR "${CMAKE_BINARY_DIR}/generated")
+set(DOGGO_SHADER_BINDINGS_HEADER
+        "${DOGGO_GENERATED_INCLUDE_DIR}/doggo/render/render_ShaderBindings.hpp")
+
+doggo_add_shader_abi(
+        TARGET doggo_shader_abi
+        ABI "${DOGGO_SHADER_ABI}"
+        OUTPUT "${DOGGO_SHADER_BINDINGS_HEADER}"
 )
 
-nx_add_shader_program(doggo_gate0_triangle_fsh
+add_dependencies(${APP_TARGET} doggo_shader_abi)
+target_include_directories(${APP_TARGET}
+        PRIVATE
+        "${DOGGO_GENERATED_INCLUDE_DIR}"
+)
+
+doggo_add_shader_program(
+        TARGET doggo_gate0_triangle_shaders
+        MANIFEST "${GATE0_SHADER_SOURCE_DIR}/gate0_triangle.shader"
+        ABI "${DOGGO_SHADER_ABI}"
+        ABI_TARGET doggo_shader_abi
+        OUTPUT_DIRECTORY "${GATE0_SHADER_OUTPUT_DIR}"
+        UAM "${NX_UAM_EXE}"
+        SOURCES
+        "${GATE0_SHADER_SOURCE_DIR}/gate0_triangle_vsh.glsl"
         "${GATE0_SHADER_SOURCE_DIR}/gate0_triangle_fsh.glsl"
-        frag
+        OUTPUTS
+        doggo_gate0_triangle_vsh.dksh
+        doggo_gate0_triangle_fsh.dksh
+        doggo_gate0_triangle.dsm
 )
 
 dkp_add_asset_target(${APP_ROMFS_TARGET}
@@ -82,8 +108,7 @@ dkp_track_assets(${APP_ROMFS_TARGET}
 dkp_install_assets(${APP_ROMFS_TARGET}
         DESTINATION shaders/gate0
         TARGETS
-        doggo_gate0_triangle_vsh
-        doggo_gate0_triangle_fsh
+        doggo_gate0_triangle_shaders
 )
 
 nx_generate_nacp(${APP_TARGET}.nacp

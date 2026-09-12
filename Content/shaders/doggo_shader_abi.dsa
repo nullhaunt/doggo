@@ -1,0 +1,35 @@
+doggo_shader_abi 1
+
+# Uniform buffers: shared graphics and compute ABI.
+ubo 0 frame_view
+ubo 1 draw_object
+ubo 2 material
+ubo 3 pass
+ubo 4 compute_dispatch_0
+ubo 5 compute_dispatch_1
+
+# Storage buffers.
+ssbo 0 world_transforms
+ssbo 1 bone_palettes
+ssbo 2 lights_and_tiles
+ssbo 3 instance_visibility
+
+# Canonical material textures.
+sampler 0 base_color
+sampler 1 normal
+sampler 2 material_parameters
+sampler 3 emissive
+sampler 4 detail_mask
+sampler 5 material_auxiliary_0
+sampler 6 material_auxiliary_1
+sampler 7 material_auxiliary_2
+
+# Shadows, probes, and scene textures.
+sampler 8 directional_shadow
+sampler 9 local_shadow
+sampler 10 irradiance_probe
+sampler 11 reflection_probe
+sampler 12 scene_depth
+sampler 13 scene_color
+sampler 14 motion_vectors
+sampler 15 reactive_mask

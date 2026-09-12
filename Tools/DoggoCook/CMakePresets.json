@@ -1,0 +1,64 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "../../build/${presetName}"
+    },
+    {
+      "name": "doggocook-debug",
+      "displayName": "DoggoCook Debug",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "DOGGO_COOK_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "doggocook-release",
+      "displayName": "DoggoCook Release",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "DOGGO_COOK_BUILD_TESTS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "doggocook-debug",
+      "displayName": "DoggoCook (Debug)",
+      "configurePreset": "doggocook-debug",
+      "targets": "doggo-cook"
+    },
+    {
+      "name": "doggocook-release",
+      "displayName": "DoggoCook (Release)",
+      "configurePreset": "doggocook-release",
+      "targets": "doggo-cook"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "doggocook-debug",
+      "configurePreset": "doggocook-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "doggocook-release",
+      "configurePreset": "doggocook-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

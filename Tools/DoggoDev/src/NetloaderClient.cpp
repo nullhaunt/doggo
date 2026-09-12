@@ -2,8 +2,6 @@
 
 #include "Network.hpp"
 
-#include <doggo/doggo_Macro.hpp>
-
 #include <zlib.h>
 
 #include <array>
@@ -105,10 +103,12 @@ namespace
 
   class DeflateState final
   {
-      DOGGO_DISALLOW_COPY( DeflateState );
-      DOGGO_DISALLOW_MOVE( DeflateState );
-
     public:
+      DeflateState( const DeflateState & )             = delete;
+      DeflateState( DeflateState && )                  = delete;
+      DeflateState & operator=( const DeflateState & ) = delete;
+      DeflateState & operator=( DeflateState && )      = delete;
+
       DeflateState()
       {
         mStream.zalloc = Z_NULL;

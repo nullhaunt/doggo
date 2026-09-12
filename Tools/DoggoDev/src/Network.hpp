@@ -1,7 +1,5 @@
 #pragma once
 
-#include <doggo/doggo_Macro.hpp>
-
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
@@ -28,9 +26,6 @@ namespace doggo::devtool
 
   class NetworkRuntime final
   {
-      DOGGO_DISALLOW_COPY( NetworkRuntime );
-      DOGGO_DISALLOW_MOVE( NetworkRuntime );
-
     public:
       NetworkRuntime();
       ~NetworkRuntime();
@@ -38,15 +33,10 @@ namespace doggo::devtool
 
   class Socket final
   {
-      DOGGO_DISALLOW_COPY( Socket );
-
     public:
       Socket() noexcept = default;
       explicit Socket( NativeSocket handle ) noexcept;
       ~Socket();
-
-      Socket( Socket && other ) noexcept;
-      Socket & operator=( Socket && other ) noexcept;
 
       [[nodiscard]] bool         isOpen() const noexcept;
       [[nodiscard]] NativeSocket nativeHandle() const noexcept;

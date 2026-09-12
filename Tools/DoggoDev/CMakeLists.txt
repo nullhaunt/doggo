@@ -15,12 +15,6 @@ add_executable(doggo-dev
         src/Network.cpp
 )
 
-target_include_directories(doggo-dev
-        PRIVATE
-        src
-        ../../Engine/include
-)
-
 target_compile_features(doggo-dev
         PRIVATE
         cxx_std_20

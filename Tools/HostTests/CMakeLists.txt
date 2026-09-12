@@ -13,6 +13,7 @@ get_filename_component(DOGGO_WORKSPACE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." 
 
 add_executable(doggo-host-tests
         "${DOGGO_WORKSPACE_ROOT}/Engine/src/gpu/gpu_ArenaAllocator.cpp"
+        "${DOGGO_WORKSPACE_ROOT}/Engine/src/gpu/gpu_UploadRingAllocator.cpp"
         tests/GpuArenaAllocatorTests.cpp
 )
 

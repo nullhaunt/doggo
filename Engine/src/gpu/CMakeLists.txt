@@ -1,5 +1,6 @@
 add_library(doggo_gpu STATIC
         gpu_ArenaAllocator.cpp
+        gpu_UploadRingAllocator.cpp
 )
 
 add_library(doggo::gpu ALIAS doggo_gpu)

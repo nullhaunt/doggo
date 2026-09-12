@@ -1,4 +1,5 @@
 #include <doggo/gpu/gpu_ArenaAllocator.hpp>
+#include <doggo/gpu/gpu_UploadRingAllocator.hpp>
 
 #include <cstdint>
 #include <iostream>
@@ -13,6 +14,9 @@ namespace
   using doggo::gpu::ArenaAllocationStatus;
   using doggo::gpu::ArenaAllocator;
   using doggo::gpu::ArenaReleaseStatus;
+  using doggo::gpu::UploadRingAllocator;
+  using doggo::gpu::UploadRingSlice;
+  using doggo::gpu::UploadRingStatus;
 
   void require( const bool condition, const std::string_view message )
   {
@@ -32,6 +36,18 @@ namespace
     require( result.allocation.isValid(), "successful allocation returned an invalid handle" );
     require( allocator.owns( result.allocation ), "allocator does not own its successful allocation" );
     return result.allocation;
+  }
+
+  [[nodiscard]] UploadRingSlice allocateUpload( UploadRingAllocator &  allocator,
+                                                const std::uint32_t    size,
+                                                const std::uint32_t    alignment,
+                                                const std::string_view message )
+  {
+    const doggo::gpu::UploadRingAllocationResult result = allocator.allocate( size, alignment );
+    require( result.status == UploadRingStatus::Success, message );
+    require( result.slice.isValid(), "successful upload allocation returned an invalid slice" );
+    require( allocator.owns( result.slice ), "upload ring does not own its successful allocation" );
+    return result.slice;
   }
 
   void testInitializationAndAlignedPlacement()
@@ -162,6 +178,131 @@ namespace
              "full allocation table returned the wrong status" );
     require( allocator.snapshot().allocation_failure_count == 1, "allocation limit failure was not counted" );
   }
+
+  void testUploadRingLifecycleAndWrap()
+  {
+    UploadRingAllocator allocator;
+    require( !allocator.initialize( 0, 3 ), "zero-capacity upload ring initialized" );
+    require( !allocator.initialize( 128, 0 ), "zero-frame upload ring initialized" );
+    require( allocator.initialize( 100, 3 ), "upload ring initialization failed" );
+
+    require( allocator.beginFrame( 0, false ) == UploadRingStatus::Success, "frame zero did not begin" );
+    const UploadRingSlice first = allocateUpload( allocator, 30, 8, "first upload allocation failed" );
+    require( first.offset == 0, "first upload allocation did not begin at zero" );
+    require( allocator.endFrame() == UploadRingStatus::Success, "frame zero did not end" );
+
+    require( allocator.beginFrame( 1, false ) == UploadRingStatus::Success, "frame one did not begin" );
+    const UploadRingSlice second = allocateUpload( allocator, 20, 16, "second upload allocation failed" );
+    require( second.offset == 32, "second upload allocation did not honor alignment" );
+    require( allocator.endFrame() == UploadRingStatus::Success, "frame one did not end" );
+
+    require( allocator.beginFrame( 2, false ) == UploadRingStatus::Success, "frame two did not begin" );
+    const UploadRingSlice third = allocateUpload( allocator, 30, 64, "third upload allocation failed" );
+    require( third.offset == 64, "third upload allocation did not honor alignment" );
+    require( allocator.endFrame() == UploadRingStatus::Success, "frame two did not end" );
+
+    require( allocator.beginFrame( 0, true ) == UploadRingStatus::Success, "frame zero did not retire" );
+    require( !allocator.owns( first ), "retired upload slice remained valid" );
+    const UploadRingSlice wrapped = allocateUpload( allocator, 16, 8, "wrapped upload allocation failed" );
+    require( wrapped.offset == 0, "upload ring did not wrap to zero" );
+
+    const doggo::gpu::UploadRingSnapshot snapshot = allocator.snapshot();
+    require( snapshot.capacity_bytes == 100, "upload snapshot capacity is incorrect" );
+    require( snapshot.occupancy_bytes == 86, "upload snapshot occupancy is incorrect" );
+    require( snapshot.available_bytes == 14, "upload snapshot availability is incorrect" );
+    require( snapshot.current_frame_bytes == 16, "current-frame upload bytes are incorrect" );
+    require( snapshot.last_frame_bytes == 30, "last-frame upload bytes are incorrect" );
+    require( snapshot.peak_frame_bytes == 30, "peak frame upload bytes are incorrect" );
+    require( snapshot.in_flight_frame_count == 2, "in-flight upload frame count is incorrect" );
+    require( snapshot.submitted_frame_count == 3, "submitted upload frame count is incorrect" );
+    require( snapshot.retired_frame_count == 1, "retired upload frame count is incorrect" );
+    require( snapshot.total_submitted_bytes == 80, "total submitted upload bytes are incorrect" );
+    require( snapshot.wrap_count == 1, "upload wrap count is incorrect" );
+    require( snapshot.stall_count == 1, "upload stall count is incorrect" );
+  }
+
+  void testUploadRingFailuresAndRetirementOrder()
+  {
+    UploadRingAllocator allocator;
+    require( allocator.allocate( 1, 1 ).status == UploadRingStatus::NotInitialized,
+             "uninitialized upload allocation returned the wrong status" );
+    require( allocator.initialize( 64, 3 ), "upload ring initialization failed" );
+    require( allocator.beginFrame( 3, false ) == UploadRingStatus::FrameIndexOutOfRange,
+             "out-of-range upload frame was accepted" );
+
+    require( allocator.beginFrame( 0, false ) == UploadRingStatus::Success, "frame zero did not begin" );
+    ( void )allocateUpload( allocator, 32, 1, "frame zero upload failed" );
+    require( allocator.beginFrame( 1, false ) == UploadRingStatus::FrameAlreadyActive,
+             "upload ring accepted two active frames" );
+    require( allocator.endFrame() == UploadRingStatus::Success, "frame zero did not end" );
+
+    require( allocator.beginFrame( 1, false ) == UploadRingStatus::Success, "frame one did not begin" );
+    ( void )allocateUpload( allocator, 16, 1, "frame one upload failed" );
+    require( allocator.allocate( 17, 1 ).status == UploadRingStatus::OutOfSpace,
+             "exhausted upload ring returned the wrong status" );
+    require( allocator.endFrame() == UploadRingStatus::Success, "frame one did not end" );
+
+    require( allocator.beginFrame( 1, false ) == UploadRingStatus::FrameRetirementOutOfOrder,
+             "out-of-order upload retirement was accepted" );
+    require( allocator.beginFrame( 0, false ) == UploadRingStatus::Success, "oldest upload frame did not retire" );
+    require( allocator.abortFrame() == UploadRingStatus::Success, "empty upload frame did not abort" );
+
+    const doggo::gpu::UploadRingSnapshot snapshot = allocator.snapshot();
+    require( snapshot.allocation_attempt_count == 3, "upload allocation attempts were not counted" );
+    require( snapshot.allocation_failure_count == 1, "upload allocation failures were not counted" );
+  }
+
+  void testUploadRingAbortAndMassRetirement()
+  {
+    UploadRingAllocator allocator;
+    require( allocator.initialize( 64, 2 ), "upload ring initialization failed" );
+    require( allocator.beginFrame( 0, false ) == UploadRingStatus::Success, "frame zero did not begin" );
+    const UploadRingSlice aborted = allocateUpload( allocator, 48, 1, "aborted upload allocation failed" );
+    require( allocator.abortFrame() == UploadRingStatus::Success, "upload frame did not abort" );
+    require( !allocator.owns( aborted ), "aborted upload slice remained valid" );
+    require( allocator.snapshot().occupancy_bytes == 0, "aborted upload bytes remained occupied" );
+
+    require( allocator.beginFrame( 0, false ) == UploadRingStatus::Success, "frame zero did not restart" );
+    ( void )allocateUpload( allocator, 32, 1, "frame zero upload failed" );
+    require( allocator.endFrame() == UploadRingStatus::Success, "frame zero did not end" );
+    require( allocator.beginFrame( 1, false ) == UploadRingStatus::Success, "frame one did not begin" );
+    ( void )allocateUpload( allocator, 16, 1, "frame one upload failed" );
+    require( allocator.endFrame() == UploadRingStatus::Success, "frame one did not end" );
+    require( allocator.retireAllFrames() == UploadRingStatus::Success, "mass retirement failed" );
+
+    const doggo::gpu::UploadRingSnapshot snapshot = allocator.snapshot();
+    require( snapshot.occupancy_bytes == 0, "mass retirement did not empty the upload ring" );
+    require( snapshot.in_flight_frame_count == 0, "mass retirement left frames in flight" );
+    require( snapshot.retired_frame_count == 2, "mass retirement count is incorrect" );
+  }
+
+  void testUploadRingLongRun()
+  {
+    UploadRingAllocator allocator;
+    require( allocator.initialize( 256, 3 ), "upload ring initialization failed" );
+
+    std::uint64_t expectedSubmittedBytes = 0;
+    for ( std::uint32_t frame = 0; frame < 1'000; ++frame )
+    {
+      require( allocator.beginFrame( frame % 3, false ) == UploadRingStatus::Success,
+               "long-run upload frame did not begin" );
+      const std::uint32_t   size      = 17 + frame % 5;
+      const std::uint32_t   alignment = 1u << ( frame % 4 );
+      const UploadRingSlice slice     = allocateUpload( allocator, size, alignment, "long-run upload failed" );
+      require( slice.offset % alignment == 0, "long-run upload alignment is incorrect" );
+      require( allocator.snapshot().occupancy_bytes <= allocator.snapshot().capacity_bytes,
+               "long-run upload occupancy exceeded capacity" );
+      require( allocator.endFrame() == UploadRingStatus::Success, "long-run upload frame did not end" );
+      expectedSubmittedBytes += size;
+    }
+
+    require( allocator.retireAllFrames() == UploadRingStatus::Success, "long-run retirement failed" );
+    const doggo::gpu::UploadRingSnapshot snapshot = allocator.snapshot();
+    require( snapshot.occupancy_bytes == 0, "long-run retirement did not empty the upload ring" );
+    require( snapshot.submitted_frame_count == 1'000, "long-run submitted frame count is incorrect" );
+    require( snapshot.total_submitted_bytes == expectedSubmittedBytes, "long-run submitted byte count is incorrect" );
+    require( snapshot.wrap_count != 0, "long-run upload ring never wrapped" );
+  }
 }  // namespace
 
 int main()
@@ -174,6 +315,10 @@ int main()
     testForeignAndReinitializedHandles();
     testFailureDiagnosticsAndOverflow();
     testAllocationLimit();
+    testUploadRingLifecycleAndWrap();
+    testUploadRingFailuresAndRetirementOrder();
+    testUploadRingAbortAndMassRetirement();
+    testUploadRingLongRun();
     std::cout << "doggo-host-tests: all tests passed\n";
     return 0;
   }

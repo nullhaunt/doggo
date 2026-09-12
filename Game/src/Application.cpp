@@ -4,6 +4,7 @@
 #include <doggo/gpu/deko/deko_GraphicsProgram.hpp>
 #include <doggo/gpu/deko/deko_MemoryArena.hpp>
 #include <doggo/gpu/deko/deko_Presenter.hpp>
+#include <doggo/gpu/deko/deko_UploadRing.hpp>
 #include <doggo/log/log_Log.hpp>
 #include <doggo/platform/nx/nx_AppletLifecycle.hpp>
 #include <doggo/platform/nx/nx_Input.hpp>
@@ -19,6 +20,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <format>
 #include <limits>
 #include <span>
@@ -32,10 +34,63 @@ namespace
   constexpr char          BootstrapFragmentShaderPath[]  = "romfs:/shaders/bootstrap/doggo_bootstrap_triangle_fsh.dksh";
   constexpr std::size_t   BootstrapShaderBinaryCapacity  = 64u * 1024u;
   constexpr std::uint32_t ShaderCodeArenaMemoryBlockSize = 4u * 1024u * 1024u;
+  constexpr std::uint32_t UploadRingMemoryBlockSize      = 3u * 1024u * 1024u;
   constexpr std::uint32_t HandheldWidth                  = 1280;
   constexpr std::uint32_t HandheldHeight                 = 720;
   constexpr std::uint32_t DockedWidth                    = 1920;
   constexpr std::uint32_t DockedHeight                   = 1080;
+
+  struct BootstrapVertex final
+  {
+      std::array<float, 2> position;
+      std::array<float, 4> color;
+  };
+
+  constexpr std::array<BootstrapVertex, 3> BootstrapVertices = {
+      BootstrapVertex{ .position = { 0.0f, 0.75f }, .color = { 1.0f, 0.2f, 0.2f, 1.0f } },
+      BootstrapVertex{ .position = { -0.75f, -0.75f }, .color = { 0.2f, 1.0f, 0.2f, 1.0f } },
+      BootstrapVertex{ .position = { 0.75f, -0.75f }, .color = { 0.2f, 0.4f, 1.0f, 1.0f } },
+  };
+  static_assert( sizeof( BootstrapVertex ) == 6 * sizeof( float ) );
+  static_assert( offsetof( BootstrapVertex, color ) == 2 * sizeof( float ) );
+
+  enum class BootstrapFrameStatus : std::uint8_t
+  {
+    Success,
+    PresentationFailed,
+    UploadBeginFailed,
+    UploadAllocationFailed,
+    UploadMappingFailed,
+    UploadEndFailed,
+  };
+
+  struct BootstrapFrameReport final
+  {
+      BootstrapFrameStatus                 status        = BootstrapFrameStatus::Success;
+      doggo::gpu::deko::PresentationReport presentation  = {};
+      doggo::gpu::UploadRingStatus         upload_status = doggo::gpu::UploadRingStatus::Success;
+  };
+
+  [[nodiscard]] const char * getBootstrapFrameStatusName( const BootstrapFrameStatus status ) noexcept
+  {
+    switch ( status )
+    {
+      case BootstrapFrameStatus::Success:
+        return "Success";
+      case BootstrapFrameStatus::PresentationFailed:
+        return "Presentation Failed";
+      case BootstrapFrameStatus::UploadBeginFailed:
+        return "Upload Begin Failed";
+      case BootstrapFrameStatus::UploadAllocationFailed:
+        return "Upload Allocation Failed";
+      case BootstrapFrameStatus::UploadMappingFailed:
+        return "Upload Mapping Failed";
+      case BootstrapFrameStatus::UploadEndFailed:
+        return "Upload End Failed";
+    }
+
+    return "Unknown";
+  }
 
   [[nodiscard]] std::chrono::nanoseconds
   elapsedSince( const doggo::platform::nx::MonotonicClock::time_point timestamp,
@@ -101,16 +156,51 @@ namespace
     return { .width = HandheldWidth, .height = HandheldHeight };
   }
 
-  [[nodiscard]] doggo::gpu::deko::PresentationReport
-  renderBootstrapFrame( doggo::gpu::deko::Presenter &             presenter,
-                        const doggo::gpu::deko::GraphicsProgram & graphicsProgram ) noexcept
+  [[nodiscard]] BootstrapFrameReport renderBootstrapFrame( doggo::gpu::deko::Presenter &             presenter,
+                                                           const doggo::gpu::deko::GraphicsProgram & graphicsProgram,
+                                                           doggo::gpu::deko::UploadRing & uploadRing ) noexcept
   {
     doggo::gpu::deko::PresentationFrame  frame;
     doggo::gpu::deko::PresentationReport report = presenter.beginFrame( frame );
     if ( report.status != doggo::gpu::deko::PresentationStatus::Success )
     {
-      return report;
+      return { .status = BootstrapFrameStatus::PresentationFailed, .presentation = report };
     }
+
+    const doggo::gpu::UploadRingStatus beginStatus =
+        uploadRing.beginFrame( frame.context_index, frame.waited_for_completion );
+    if ( beginStatus != doggo::gpu::UploadRingStatus::Success )
+    {
+      return {
+          .status        = BootstrapFrameStatus::UploadBeginFailed,
+          .presentation  = report,
+          .upload_status = beginStatus,
+      };
+    }
+
+    const doggo::gpu::UploadRingAllocationResult vertexAllocation =
+        uploadRing.allocate( sizeof( BootstrapVertices ), alignof( BootstrapVertex ) );
+    if ( vertexAllocation.status != doggo::gpu::UploadRingStatus::Success )
+    {
+      ( void )uploadRing.abortFrame();
+      return {
+          .status        = BootstrapFrameStatus::UploadAllocationFailed,
+          .presentation  = report,
+          .upload_status = vertexAllocation.status,
+      };
+    }
+
+    const std::span<std::byte> vertexMemory = uploadRing.cpuSpan( vertexAllocation.slice );
+    if ( vertexMemory.size() != sizeof( BootstrapVertices ) )
+    {
+      ( void )uploadRing.abortFrame();
+      return {
+          .status       = BootstrapFrameStatus::UploadMappingFailed,
+          .presentation = report,
+      };
+    }
+
+    std::memcpy( vertexMemory.data(), BootstrapVertices.data(), sizeof( BootstrapVertices ) );
 
     const dk::ImageView colorTarget{ *frame.color_image };
     frame.command_buffer.bindRenderTargets( &colorTarget );
@@ -129,13 +219,61 @@ namespace
     frame.command_buffer.clearColor( 0, DkColorMask_RGBA, 0.5f, 0.5f, 0.5f, 1.0f );
 
     graphicsProgram.bind( frame.command_buffer );
+
+    constexpr std::array<DkVtxAttribState, 2> vertexAttributes = {
+        DkVtxAttribState{
+            .bufferId = 0,
+            .isFixed  = false,
+            .offset   = offsetof( BootstrapVertex, position ),
+            .size     = DkVtxAttribSize_2x32,
+            .type     = DkVtxAttribType_Float,
+            .isBgra   = false,
+        },
+        DkVtxAttribState{
+            .bufferId = 0,
+            .isFixed  = false,
+            .offset   = offsetof( BootstrapVertex, color ),
+            .size     = DkVtxAttribSize_4x32,
+            .type     = DkVtxAttribType_Float,
+            .isBgra   = false,
+        },
+    };
+    constexpr std::array<DkVtxBufferState, 1> vertexBuffers = {
+        DkVtxBufferState{ .stride = sizeof( BootstrapVertex ), .divisor = 0 },
+    };
+    frame.command_buffer.bindVtxAttribState( vertexAttributes );
+    frame.command_buffer.bindVtxBufferState( vertexBuffers );
+    frame.command_buffer.bindVtxBuffer( 0,
+                                        uploadRing.gpuAddress( vertexAllocation.slice ),
+                                        vertexAllocation.slice.size );
+
     dk::RasterizerState rasterizerState;
     rasterizerState.setCullMode( DkFace_None );
     frame.command_buffer.bindRasterizerState( rasterizerState );
     frame.command_buffer.bindColorState( dk::ColorState{} );
     frame.command_buffer.bindColorWriteState( dk::ColorWriteState{} );
     frame.command_buffer.draw( DkPrimitive_Triangles, 3, 1, 0, 0 );
-    return presenter.endFrame();
+
+    report                                       = presenter.endFrame();
+    const doggo::gpu::UploadRingStatus endStatus = uploadRing.endFrame();
+    if ( report.status != doggo::gpu::deko::PresentationStatus::Success )
+    {
+      return {
+          .status        = BootstrapFrameStatus::PresentationFailed,
+          .presentation  = report,
+          .upload_status = endStatus,
+      };
+    }
+    if ( endStatus != doggo::gpu::UploadRingStatus::Success )
+    {
+      return {
+          .status        = BootstrapFrameStatus::UploadEndFailed,
+          .presentation  = report,
+          .upload_status = endStatus,
+      };
+    }
+
+    return { .presentation = report };
   }
 
   [[nodiscard]] bool readShaderBinary( doggo::log::Logger &                                  logger,
@@ -321,6 +459,28 @@ namespace doggo::game
       exitCode = EXIT_FAILURE;
     }
 
+    gpu::deko::UploadRing uploadRing;
+    if ( graphicsContext.isInitialized() )
+    {
+      static_assert( gpu::deko::Presenter::FrameCount <= gpu::UploadRingAllocator::MaximumFrameCount );
+      constexpr gpu::deko::UploadRingConfig uploadRingConfig = {
+          .capacity_bytes = UploadRingMemoryBlockSize,
+          .frame_count    = gpu::deko::Presenter::FrameCount,
+      };
+      const gpu::deko::UploadRingInitializationStatus uploadRingStatus =
+          uploadRing.initialize( graphicsContext.device(), uploadRingConfig );
+      if ( uploadRingStatus != gpu::deko::UploadRingInitializationStatus::Success )
+      {
+        writeLog( logger,
+                  log::Level::Error,
+                  "GPU",
+                  std::format( "Upload-ring initialization failed: {}",
+                               gpu::deko::getUploadRingInitializationStatusName( uploadRingStatus ) ),
+                  startedAt );
+        exitCode = EXIT_FAILURE;
+      }
+    }
+
     platform::nx::MemoryReport memoryReport;
     const std::uint32_t        memoryResult = platform::nx::queryMemoryReport( memoryReport );
     if ( R_FAILED( memoryResult ) )
@@ -335,18 +495,21 @@ namespace doggo::game
 
     if ( exitCode == EXIT_SUCCESS )
     {
-      const gpu::deko::MemoryArenaSnapshot shaderArenaSnapshot = shaderCodeArena.snapshot();
-      writeLog( logger,
-                log::Level::Info,
-                "Startup",
-                std::format( "Ready: {}x{}, {} frame contexts, {:.2f} MiB free, shader code {} / {} KiB",
-                             initialExtent.width,
-                             initialExtent.height,
-                             gpu::deko::Presenter::FrameCount,
-                             static_cast<double>( memoryReport.process_free_bytes ) / BytesPerMebibyte,
-                             shaderArenaSnapshot.allocations.used_bytes / 1024u,
-                             shaderArenaSnapshot.allocations.capacity_bytes / 1024u ),
-                startedAt );
+      const gpu::deko::MemoryArenaSnapshot    shaderArenaSnapshot = shaderCodeArena.snapshot();
+      const gpu::deko::DekoUploadRingSnapshot uploadRingSnapshot  = uploadRing.snapshot();
+      writeLog(
+          logger,
+          log::Level::Info,
+          "Startup",
+          std::format( "Ready: {}x{}, {} frame contexts, {:.2f} MiB free, shader code {} / {} KiB, upload ring {} KiB",
+                       initialExtent.width,
+                       initialExtent.height,
+                       gpu::deko::Presenter::FrameCount,
+                       static_cast<double>( memoryReport.process_free_bytes ) / BytesPerMebibyte,
+                       shaderArenaSnapshot.allocations.used_bytes / 1024u,
+                       shaderArenaSnapshot.allocations.capacity_bytes / 1024u,
+                       uploadRingSnapshot.allocations.capacity_bytes / 1024u ),
+          startedAt );
     }
 
     bool                          isRunning       = exitCode == EXIT_SUCCESS;
@@ -430,6 +593,19 @@ namespace doggo::game
           break;
         }
 
+        const gpu::UploadRingStatus retireStatus = uploadRing.retireAllFrames();
+        if ( retireStatus != gpu::UploadRingStatus::Success )
+        {
+          writeLog(
+              logger,
+              log::Level::Error,
+              "GPU",
+              std::format( "Upload-ring resize retirement failed: {}", gpu::getUploadRingStatusName( retireStatus ) ),
+              startedAt );
+          exitCode = EXIT_FAILURE;
+          break;
+        }
+
         writeLog( logger,
                   log::Level::Info,
                   "GPU",
@@ -447,17 +623,19 @@ namespace doggo::game
         break;
       }
 
-      const gpu::deko::PresentationReport frameReport = renderBootstrapFrame( presenter, bootstrapProgram );
-      if ( frameReport.status != gpu::deko::PresentationStatus::Success )
+      const BootstrapFrameReport frameReport = renderBootstrapFrame( presenter, bootstrapProgram, uploadRing );
+      if ( frameReport.status != BootstrapFrameStatus::Success )
       {
         writeLog( logger,
                   log::Level::Error,
                   "GPU",
-                  std::format( "Frame presentation failed: {} (deko result {}, context {}, image {})",
-                               gpu::deko::getPresentationStatusName( frameReport.status ),
-                               static_cast<std::uint32_t>( frameReport.deko_result ),
-                               frameReport.context_index,
-                               frameReport.image_slot ),
+                  std::format( "Frame failed: {} (presentation {}, upload {}, deko result {}, context {}, image {})",
+                               getBootstrapFrameStatusName( frameReport.status ),
+                               gpu::deko::getPresentationStatusName( frameReport.presentation.status ),
+                               gpu::getUploadRingStatusName( frameReport.upload_status ),
+                               static_cast<std::uint32_t>( frameReport.presentation.deko_result ),
+                               frameReport.presentation.context_index,
+                               frameReport.presentation.image_slot ),
                   startedAt );
         exitCode = EXIT_FAILURE;
         break;
@@ -488,6 +666,7 @@ namespace doggo::game
       exitCode = EXIT_FAILURE;
     }
 
+    uploadRing.finalize();
     bootstrapProgram.finalize();
     shaderCodeArena.finalize();
     graphicsContext.finalize();

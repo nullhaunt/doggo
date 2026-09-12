@@ -3,6 +3,7 @@ add_library(doggo_gpu_deko STATIC
         deko_GraphicsProgram.cpp
         deko_MemoryArena.cpp
         deko_Presenter.cpp
+        deko_UploadRing.cpp
 )
 
 add_library(doggo::gpu::deko ALIAS doggo_gpu_deko)

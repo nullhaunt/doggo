@@ -145,7 +145,6 @@ namespace doggo::gpu::deko
     for ( std::size_t index = 0; index < FrameCount; ++index )
     {
       FrameContext & frame = mFrames[ index ];
-
       // The fence guards both this command buffer and its fixed memory slice.
       frame.command_buffer = dk::CmdBufMaker{ device }.create();
       if ( !frame.command_buffer )
@@ -233,10 +232,17 @@ namespace doggo::gpu::deko
       return makeReport( PresentationStatus::QueueError );
     }
 
-    FrameContext & context = mFrames[ mNextContextIndex ];
+    FrameContext & context             = mFrames[ mNextContextIndex ];
+    bool           waitedForCompletion = false;
     if ( context.is_in_flight )
     {
-      const DkResult waitResult = context.completion_fence.wait();
+      DkResult waitResult = context.completion_fence.wait( 0 );
+      if ( waitResult == DkResult_Timeout )
+      {
+        waitedForCompletion = true;
+        waitResult          = context.completion_fence.wait();
+      }
+
       if ( waitResult != DkResult_Success )
       {
         return makeReport( PresentationStatus::FenceWaitFailed,
@@ -260,11 +266,12 @@ namespace doggo::gpu::deko
     mActiveImageSlot    = imageSlot;
     mHasActiveFrame     = true;
 
-    frame.command_buffer = context.command_buffer;
-    frame.color_image    = &mFramebufferImages[ static_cast<std::size_t>( imageSlot ) ];
-    frame.extent         = mExtent;
-    frame.context_index  = static_cast<std::uint32_t>( mActiveContextIndex );
-    frame.image_slot     = imageSlot;
+    frame.command_buffer        = context.command_buffer;
+    frame.color_image           = &mFramebufferImages[ static_cast<std::size_t>( imageSlot ) ];
+    frame.extent                = mExtent;
+    frame.context_index         = static_cast<std::uint32_t>( mActiveContextIndex );
+    frame.image_slot            = imageSlot;
+    frame.waited_for_completion = waitedForCompletion;
     return makeReport( PresentationStatus::Success, DkResult_Success, frame.context_index, frame.image_slot );
   }
 

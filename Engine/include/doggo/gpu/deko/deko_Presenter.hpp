@@ -46,10 +46,11 @@ namespace doggo::gpu::deko
   struct PresentationFrame final
   {
       dk::CmdBuf         command_buffer;
-      const dk::Image *  color_image   = nullptr;
-      PresentationExtent extent        = {};
-      std::uint32_t      context_index = 0;
-      std::int32_t       image_slot    = -1;
+      const dk::Image *  color_image           = nullptr;
+      PresentationExtent extent                = {};
+      std::uint32_t      context_index         = 0;
+      std::int32_t       image_slot            = -1;
+      bool               waited_for_completion = false;
   };
 
   [[nodiscard]] const char * getPresentationStatusName( PresentationStatus status ) noexcept;

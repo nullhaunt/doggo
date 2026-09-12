@@ -5,7 +5,6 @@
 #include <switch.h>
 
 #include <arpa/inet.h>
-#include <cstdio>
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -20,16 +19,6 @@ namespace doggo::platform::nx
     constexpr int SendFlags = 0;
 #endif
   }  // namespace
-
-  void ConsoleLogSink::write( const std::string_view text ) noexcept
-  {
-    std::fwrite( text.data(), 1, text.size(), stdout );
-  }
-
-  void ConsoleLogSink::flush() noexcept
-  {
-    std::fflush( stdout );
-  }
 
   DoggoDevLogSink::~DoggoDevLogSink()
   {

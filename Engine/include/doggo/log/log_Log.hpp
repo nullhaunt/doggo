@@ -49,9 +49,9 @@ namespace doggo::log
       virtual void flush() noexcept;
   };
 
-  // Gate 0 intentionally keeps this logger synchronous and single-threaded.
-  // Record storage and fan-out use a bounded ring so they never allocate, and
-  // a future in-game console can consume the same history as external sinks.
+  // Record storage and fan-out use a bounded ring so writes never allocate.
+  // The logger remains synchronous until the runtime introduces its threading
+  // and diagnostics ownership model.
   class Logger final
   {
       DOGGO_DISALLOW_COPY( Logger );

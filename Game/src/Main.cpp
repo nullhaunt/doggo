@@ -1,7 +1,7 @@
-#include <doggo/platform/nx/nx_Application.hpp>
+#include "Application.hpp"
 
 int main()
 {
-  doggo::platform::nx::Application application;
+  doggo::game::Application application;
   return application.run();
 }

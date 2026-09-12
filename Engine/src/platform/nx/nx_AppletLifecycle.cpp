@@ -14,9 +14,8 @@ namespace doggo::platform::nx
       return 0;
     }
 
-    // A regular application reports Background only when it remains runnable.
-    // Application::run pauses foreground work and waits on the applet message
-    // event while focus is elsewhere.
+    // A regular application reports Background only while it remains runnable.
+    // The owner must pause foreground work while focus is elsewhere.
     const Result result = appletSetFocusHandlingMode( AppletFocusHandlingMode_NoSuspend );
     if ( R_FAILED( result ) )
     {

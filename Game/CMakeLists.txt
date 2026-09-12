@@ -40,11 +40,13 @@ endif ()
 
 set(APP_TARGET doggo_game)
 set(APP_ROMFS_TARGET ${APP_TARGET}_romfs)
+set(APP_ROMFS_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/romfs")
 set(APP_TITLE "DOGGO Game")
 set(APP_AUTHOR "Nullhaunt")
 set(APP_VERSION "${PROJECT_VERSION}")
 
 add_executable(${APP_TARGET}
+        src/Application.cpp
         src/Main.cpp
 )
 
@@ -55,6 +57,8 @@ target_compile_features(${APP_TARGET}
 
 target_link_libraries(${APP_TARGET}
         PRIVATE
+        doggo::gpu::deko
+        doggo::log
         doggo::platform::nx
 )
 
@@ -62,8 +66,8 @@ get_filename_component(DOGGO_WORKSPACE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABS
 include("${DOGGO_WORKSPACE_ROOT}/cmake/DoggoShaderCooking.cmake")
 
 set(DOGGO_SHADER_ABI "${DOGGO_WORKSPACE_ROOT}/Content/shaders/doggo_shader_abi.dsa")
-set(GATE0_SHADER_SOURCE_DIR "${DOGGO_WORKSPACE_ROOT}/Content/shaders/gate0")
-set(GATE0_SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/cooked/shaders/gate0")
+set(BOOTSTRAP_SHADER_SOURCE_DIR "${DOGGO_WORKSPACE_ROOT}/Content/shaders/bootstrap")
+set(BOOTSTRAP_SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/cooked/shaders/bootstrap")
 set(DOGGO_GENERATED_INCLUDE_DIR "${CMAKE_BINARY_DIR}/generated")
 set(DOGGO_SHADER_BINDINGS_HEADER
         "${DOGGO_GENERATED_INCLUDE_DIR}/doggo/render/render_ShaderBindings.hpp")
@@ -81,34 +85,28 @@ target_include_directories(${APP_TARGET}
 )
 
 doggo_add_shader_program(
-        TARGET doggo_gate0_triangle_shaders
-        MANIFEST "${GATE0_SHADER_SOURCE_DIR}/gate0_triangle.shader"
+        TARGET doggo_bootstrap_triangle_shaders
+        MANIFEST "${BOOTSTRAP_SHADER_SOURCE_DIR}/bootstrap_triangle.shader"
         ABI "${DOGGO_SHADER_ABI}"
         ABI_TARGET doggo_shader_abi
-        OUTPUT_DIRECTORY "${GATE0_SHADER_OUTPUT_DIR}"
+        OUTPUT_DIRECTORY "${BOOTSTRAP_SHADER_OUTPUT_DIR}"
         UAM "${NX_UAM_EXE}"
         SOURCES
-        "${GATE0_SHADER_SOURCE_DIR}/gate0_triangle_vsh.glsl"
-        "${GATE0_SHADER_SOURCE_DIR}/gate0_triangle_fsh.glsl"
+        "${BOOTSTRAP_SHADER_SOURCE_DIR}/bootstrap_triangle_vsh.glsl"
+        "${BOOTSTRAP_SHADER_SOURCE_DIR}/bootstrap_triangle_fsh.glsl"
         OUTPUTS
-        doggo_gate0_triangle_vsh.dksh
-        doggo_gate0_triangle_fsh.dksh
-        doggo_gate0_triangle.dsm
+        doggo_bootstrap_triangle_vsh.dksh
+        doggo_bootstrap_triangle_fsh.dksh
+        doggo_bootstrap_triangle.dsm
 )
 
-dkp_add_asset_target(${APP_ROMFS_TARGET}
-        "${CMAKE_CURRENT_SOURCE_DIR}/romfs"
-)
-
-dkp_track_assets(${APP_ROMFS_TARGET}
-        FOLDER gate0
-        FILES read_fixture.bin
-)
+file(MAKE_DIRECTORY "${APP_ROMFS_DIRECTORY}")
+dkp_add_asset_target(${APP_ROMFS_TARGET} "${APP_ROMFS_DIRECTORY}")
 
 dkp_install_assets(${APP_ROMFS_TARGET}
-        DESTINATION shaders/gate0
+        DESTINATION shaders/bootstrap
         TARGETS
-        doggo_gate0_triangle_shaders
+        doggo_bootstrap_triangle_shaders
 )
 
 nx_generate_nacp(${APP_TARGET}.nacp

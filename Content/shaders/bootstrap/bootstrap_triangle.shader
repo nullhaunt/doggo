@@ -1,0 +1,5 @@
+doggo_shader_program 1
+program doggo_bootstrap_triangle
+stage vert bootstrap_triangle_vsh.glsl
+stage frag bootstrap_triangle_fsh.glsl
+variant default

@@ -6,13 +6,6 @@
 
 namespace doggo::platform::nx
 {
-  class ConsoleLogSink final : public log::Sink
-  {
-    public:
-      void write( std::string_view text ) noexcept override;
-      void flush() noexcept override;
-  };
-
   class DoggoDevLogSink final : public log::Sink
   {
       DOGGO_DISALLOW_COPY( DoggoDevLogSink );

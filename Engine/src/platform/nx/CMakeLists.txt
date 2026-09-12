@@ -1,7 +1,5 @@
 add_library(doggo_platform_nx STATIC
         nx_AppletLifecycle.cpp
-        nx_Application.cpp
-        nx_AudrenTone.cpp
         nx_Input.cpp
         nx_LogSinks.cpp
         nx_Memory.cpp
@@ -24,9 +22,7 @@ target_compile_features(doggo_platform_nx
 
 target_link_libraries(doggo_platform_nx
         PUBLIC
-        doggo::save
-        PRIVATE
-        doggo::gpu::deko
         doggo::log
+        doggo::save
         nx
 )

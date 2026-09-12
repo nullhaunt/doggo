@@ -1,6 +1,0 @@
-doggo_cooked_shader_manifest 1
-shader_abi 1
-program doggo_gate0_triangle
-compiler "uam 1.1.0 - Built on Dec 17 2020 20:28:03"
-stage default vert doggo_gate0_triangle_vsh.dksh 1024 0xB05C35D1353C48B7
-stage default frag doggo_gate0_triangle_fsh.dksh 512 0xC08106CE4EA0303A

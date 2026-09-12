@@ -7,7 +7,6 @@
 
 #include <array>
 #include <cstddef>
-#include <cstdint>
 
 namespace doggo::platform::nx
 {

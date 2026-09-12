@@ -1,6 +1,7 @@
 add_library(doggo_gpu_deko STATIC
         deko_GraphicsContext.cpp
         deko_GraphicsProgram.cpp
+        deko_MemoryArena.cpp
         deko_Presenter.cpp
 )
 
@@ -18,6 +19,7 @@ target_compile_features(doggo_gpu_deko
 
 target_link_libraries(doggo_gpu_deko
         PUBLIC
+        doggo::gpu
         $<IF:$<CONFIG:Debug>,deko3dd,deko3d>
         PRIVATE
         doggo::log

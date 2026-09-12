@@ -10,6 +10,13 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(DOGGO_BUILD_GAME "Build the DOGGO game" ON)
+option(DOGGO_BUILD_HOST_TESTS "Build platform-independent DOGGO host tests" OFF)
+
+if (DOGGO_BUILD_HOST_TESTS)
+    enable_testing()
+    add_subdirectory(Tools/HostTests)
+    return()
+endif ()
 
 add_subdirectory(Engine)
 

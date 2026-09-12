@@ -3,7 +3,6 @@
 #include "doggo/doggo_Macro.hpp"
 
 #include <chrono>
-#include <cstdint>
 #include <ratio>
 
 namespace doggo::platform::nx

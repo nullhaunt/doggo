@@ -1,5 +1,7 @@
 #include "doggo/gpu/deko/deko_GraphicsProgram.hpp"
 
+#include "doggo/gpu/deko/deko_MemoryArena.hpp"
+
 #include <cstring>
 #include <limits>
 
@@ -55,11 +57,14 @@ namespace doggo::gpu::deko
       case GraphicsProgramStatus::InvalidArgument:
         return "Invalid Argument";
 
+      case GraphicsProgramStatus::CodeArenaNotInitialized:
+        return "Code Arena Not Initialized";
+
       case GraphicsProgramStatus::ShaderCodeSizeOverflow:
         return "Shader Code Size Overflow";
 
-      case GraphicsProgramStatus::CodeMemoryCreationFailed:
-        return "Code Memory Creation Failed";
+      case GraphicsProgramStatus::CodeArenaAllocationFailed:
+        return "Code Arena Allocation Failed";
 
       case GraphicsProgramStatus::CodeMemoryMappingFailed:
         return "Code Memory Mapping Failed";
@@ -85,7 +90,7 @@ namespace doggo::gpu::deko
     finalize();
   }
 
-  GraphicsProgramStatus GraphicsProgram::initialize( const dk::Device device,
+  GraphicsProgramStatus GraphicsProgram::initialize( MemoryArena & codeArena,
                                                      const std::span<const std::uint8_t>
                                                          vertexBinary,
                                                      const std::span<const std::uint8_t>
@@ -98,7 +103,17 @@ namespace doggo::gpu::deko
 
     finalize();
 
-    if ( !device || vertexBinary.empty() || fragmentBinary.empty() )
+    if ( vertexBinary.empty() || fragmentBinary.empty() )
+    {
+      return GraphicsProgramStatus::InvalidArgument;
+    }
+
+    if ( !codeArena.isInitialized() )
+    {
+      return GraphicsProgramStatus::CodeArenaNotInitialized;
+    }
+
+    if ( ( codeArena.snapshot().flags & DkMemBlockFlags_Code ) == 0 )
     {
       return GraphicsProgramStatus::InvalidArgument;
     }
@@ -109,40 +124,36 @@ namespace doggo::gpu::deko
       return GraphicsProgramStatus::ShaderCodeSizeOverflow;
     }
 
-    std::uint64_t shaderCodeEnd = 0;
-    std::uint64_t requiredSize  = 0;
-    std::uint64_t memorySize    = 0;
-
-    if ( !addWithoutOverflow( fragmentOffset, fragmentBinary.size(), shaderCodeEnd ) ||
-         !addWithoutOverflow( shaderCodeEnd, DK_SHADER_CODE_UNUSABLE_SIZE, requiredSize ) ||
-         !alignUp( requiredSize, DK_MEMBLOCK_ALIGNMENT, memorySize ) ||
+    std::uint64_t requiredSize = 0;
+    if ( !addWithoutOverflow( fragmentOffset, fragmentBinary.size(), requiredSize ) ||
          fragmentOffset > std::numeric_limits<std::uint32_t>::max() ||
-         memorySize > std::numeric_limits<std::uint32_t>::max() )
+         requiredSize > std::numeric_limits<std::uint32_t>::max() )
     {
       return GraphicsProgramStatus::ShaderCodeSizeOverflow;
     }
 
-    mCodeMemorySize = static_cast<std::uint32_t>( memorySize );
-    mCodeMemory     = dk::MemBlockMaker{ device, mCodeMemorySize }
-                      .setFlags( DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached | DkMemBlockFlags_Code )
-                      .create();
-    if ( !mCodeMemory )
+    const ArenaAllocationResult allocationResult =
+        codeArena.allocate( static_cast<std::uint32_t>( requiredSize ), DK_SHADER_CODE_ALIGNMENT );
+    if ( allocationResult.status != ArenaAllocationStatus::Success )
     {
-      mCodeMemorySize = 0;
-      return GraphicsProgramStatus::CodeMemoryCreationFailed;
+      return GraphicsProgramStatus::CodeArenaAllocationFailed;
     }
 
-    auto * const codeMemory = static_cast<std::uint8_t *>( mCodeMemory.getCpuAddr() );
-    if ( !codeMemory )
+    mCodeArena      = &codeArena;
+    mCodeAllocation = allocationResult.allocation;
+    mCodeMemorySize = static_cast<std::uint32_t>( requiredSize );
+
+    const std::span<std::byte> codeMemory = codeArena.cpuSpan( allocationResult.allocation );
+    if ( codeMemory.size() != requiredSize )
     {
       finalize();
       return GraphicsProgramStatus::CodeMemoryMappingFailed;
     }
 
-    std::memcpy( codeMemory, vertexBinary.data(), vertexBinary.size() );
-    std::memcpy( codeMemory + fragmentOffset, fragmentBinary.data(), fragmentBinary.size() );
+    std::memcpy( codeMemory.data(), vertexBinary.data(), vertexBinary.size() );
+    std::memcpy( codeMemory.data() + fragmentOffset, fragmentBinary.data(), fragmentBinary.size() );
 
-    dk::ShaderMaker{ mCodeMemory, 0 }.initialize( mVertexShader );
+    dk::ShaderMaker{ codeArena.memoryBlock(), mCodeAllocation.offset }.initialize( mVertexShader );
     if ( !mVertexShader.isValid() )
     {
       finalize();
@@ -155,7 +166,8 @@ namespace doggo::gpu::deko
       return GraphicsProgramStatus::UnexpectedVertexStage;
     }
 
-    dk::ShaderMaker{ mCodeMemory, static_cast<std::uint32_t>( fragmentOffset ) }.initialize( mFragmentShader );
+    dk::ShaderMaker{ codeArena.memoryBlock(), mCodeAllocation.offset + static_cast<std::uint32_t>( fragmentOffset ) }
+        .initialize( mFragmentShader );
     if ( !mFragmentShader.isValid() )
     {
       finalize();
@@ -175,7 +187,14 @@ namespace doggo::gpu::deko
   {
     mFragmentShader = {};
     mVertexShader   = {};
-    mCodeMemory     = nullptr;
+
+    if ( mCodeArena && mCodeArena->owns( mCodeAllocation ) )
+    {
+      ( void )mCodeArena->release( mCodeAllocation );
+    }
+
+    mCodeArena      = nullptr;
+    mCodeAllocation = {};
     mCodeMemorySize = 0;
   }
 
@@ -186,7 +205,7 @@ namespace doggo::gpu::deko
 
   bool GraphicsProgram::isInitialized() const noexcept
   {
-    return static_cast<bool>( mCodeMemory ) && mVertexShader.isValid() && mFragmentShader.isValid();
+    return mCodeArena && mCodeArena->owns( mCodeAllocation ) && mVertexShader.isValid() && mFragmentShader.isValid();
   }
 
   std::uint32_t GraphicsProgram::codeMemorySize() const noexcept

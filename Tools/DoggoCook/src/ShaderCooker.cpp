@@ -6,7 +6,6 @@
 #include <charconv>
 #include <chrono>
 #include <cstddef>
-#include <cstdlib>
 #include <fstream>
 #include <iomanip>
 #include <map>

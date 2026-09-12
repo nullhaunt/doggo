@@ -32,6 +32,28 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
+    },
+    {
+      "name": "host-debug",
+      "displayName": "DOGGO Host Tests (Debug)",
+      "description": "Configure platform-independent host tests in Debug mode.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "DOGGO_BUILD_GAME": "OFF",
+        "DOGGO_BUILD_HOST_TESTS": "ON"
+      }
+    },
+    {
+      "name": "host-release",
+      "displayName": "DOGGO Host Tests (Release)",
+      "description": "Configure platform-independent host tests in Release mode.",
+      "inherits": "host-debug",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
     }
   ],
   "buildPresets": [
@@ -70,6 +92,34 @@
       "displayName": "Everything (Release)",
       "configurePreset": "doggo-release",
       "targets": "doggo_all"
+    },
+    {
+      "name": "host-debug",
+      "displayName": "Host tests (Debug)",
+      "configurePreset": "host-debug",
+      "targets": "doggo-host-tests"
+    },
+    {
+      "name": "host-release",
+      "displayName": "Host tests (Release)",
+      "configurePreset": "host-release",
+      "targets": "doggo-host-tests"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "host-debug",
+      "configurePreset": "host-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "host-release",
+      "configurePreset": "host-release",
+      "output": {
+        "outputOnFailure": true
+      }
     }
   ]
 }

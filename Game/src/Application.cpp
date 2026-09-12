@@ -2,6 +2,7 @@
 
 #include <doggo/gpu/deko/deko_GraphicsContext.hpp>
 #include <doggo/gpu/deko/deko_GraphicsProgram.hpp>
+#include <doggo/gpu/deko/deko_MemoryArena.hpp>
 #include <doggo/gpu/deko/deko_Presenter.hpp>
 #include <doggo/log/log_Log.hpp>
 #include <doggo/platform/nx/nx_AppletLifecycle.hpp>
@@ -26,14 +27,15 @@
 
 namespace
 {
-  constexpr double        BytesPerMebibyte              = 1024.0 * 1024.0;
-  constexpr char          BootstrapVertexShaderPath[]   = "romfs:/shaders/bootstrap/doggo_bootstrap_triangle_vsh.dksh";
-  constexpr char          BootstrapFragmentShaderPath[] = "romfs:/shaders/bootstrap/doggo_bootstrap_triangle_fsh.dksh";
-  constexpr std::size_t   BootstrapShaderBinaryCapacity = 64u * 1024u;
-  constexpr std::uint32_t HandheldWidth                 = 1280;
-  constexpr std::uint32_t HandheldHeight                = 720;
-  constexpr std::uint32_t DockedWidth                   = 1920;
-  constexpr std::uint32_t DockedHeight                  = 1080;
+  constexpr double        BytesPerMebibyte               = 1024.0 * 1024.0;
+  constexpr char          BootstrapVertexShaderPath[]    = "romfs:/shaders/bootstrap/doggo_bootstrap_triangle_vsh.dksh";
+  constexpr char          BootstrapFragmentShaderPath[]  = "romfs:/shaders/bootstrap/doggo_bootstrap_triangle_fsh.dksh";
+  constexpr std::size_t   BootstrapShaderBinaryCapacity  = 64u * 1024u;
+  constexpr std::uint32_t ShaderCodeArenaMemoryBlockSize = 4u * 1024u * 1024u;
+  constexpr std::uint32_t HandheldWidth                  = 1280;
+  constexpr std::uint32_t HandheldHeight                 = 720;
+  constexpr std::uint32_t DockedWidth                    = 1920;
+  constexpr std::uint32_t DockedHeight                   = 1080;
 
   [[nodiscard]] std::chrono::nanoseconds
   elapsedSince( const doggo::platform::nx::MonotonicClock::time_point timestamp,
@@ -63,21 +65,29 @@ namespace
     {
       case Status::Success:
         return "Success";
+
       case Status::NotInitialized:
         return "Not Initialized";
+
       case Status::InvalidArgument:
         return "Invalid Argument";
+
       case Status::OpenFailed:
         return "Open Failed";
+
       case Status::StatFailed:
         return "Stat Failed";
+
       case Status::DestinationTooSmall:
         return "Destination Too Small";
+
       case Status::ReadFailed:
         return "Read Failed";
+
       case Status::CloseFailed:
         return "Close Failed";
     }
+
     return "Unknown";
   }
 
@@ -164,7 +174,7 @@ namespace
   [[nodiscard]] bool initializeBootstrapProgram( doggo::log::Logger &                                  logger,
                                                  const doggo::platform::nx::RomFs &                    romFs,
                                                  doggo::gpu::deko::GraphicsProgram &                   graphicsProgram,
-                                                 const dk::Device                                      device,
+                                                 doggo::gpu::deko::MemoryArena &                       shaderCodeArena,
                                                  const doggo::platform::nx::MonotonicClock::time_point startedAt )
   {
     std::array<std::uint8_t, BootstrapShaderBinaryCapacity> vertexBinary   = {};
@@ -179,7 +189,7 @@ namespace
     }
 
     const doggo::gpu::deko::GraphicsProgramStatus status =
-        graphicsProgram.initialize( device,
+        graphicsProgram.initialize( shaderCodeArena,
                                     std::span<const std::uint8_t>{ vertexBinary.data(), vertexSize },
                                     std::span<const std::uint8_t>{ fragmentBinary.data(), fragmentSize } );
     if ( status == doggo::gpu::deko::GraphicsProgramStatus::Success )
@@ -279,10 +289,34 @@ namespace doggo::game
       exitCode = EXIT_FAILURE;
     }
 
+    gpu::deko::MemoryArena shaderCodeArena;
+    if ( graphicsContext.isInitialized() )
+    {
+      constexpr gpu::deko::MemoryArenaConfig shaderCodeArenaConfig = {
+          .memory_block_size_bytes = ShaderCodeArenaMemoryBlockSize,
+          .reserved_tail_bytes     = DK_SHADER_CODE_UNUSABLE_SIZE,
+          .flags                   = DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached | DkMemBlockFlags_Code,
+          .release_policy          = gpu::deko::MemoryArenaReleasePolicy::RetainedUntilFinalize,
+          .require_cpu_mapping     = true,
+      };
+      const gpu::deko::MemoryArenaStatus shaderCodeArenaStatus =
+          shaderCodeArena.initialize( graphicsContext.device(), shaderCodeArenaConfig );
+      if ( shaderCodeArenaStatus != gpu::deko::MemoryArenaStatus::Success )
+      {
+        writeLog( logger,
+                  log::Level::Error,
+                  "GPU",
+                  std::format( "Shader-code arena initialization failed: {}",
+                               gpu::deko::getMemoryArenaStatusName( shaderCodeArenaStatus ) ),
+                  startedAt );
+        exitCode = EXIT_FAILURE;
+      }
+    }
+
     gpu::deko::GraphicsProgram bootstrapProgram;
     if ( romFs.isInitialized() &&
-         graphicsContext.isInitialized() &&
-         !initializeBootstrapProgram( logger, romFs, bootstrapProgram, graphicsContext.device(), startedAt ) )
+         shaderCodeArena.isInitialized() &&
+         !initializeBootstrapProgram( logger, romFs, bootstrapProgram, shaderCodeArena, startedAt ) )
     {
       exitCode = EXIT_FAILURE;
     }
@@ -301,14 +335,17 @@ namespace doggo::game
 
     if ( exitCode == EXIT_SUCCESS )
     {
+      const gpu::deko::MemoryArenaSnapshot shaderArenaSnapshot = shaderCodeArena.snapshot();
       writeLog( logger,
                 log::Level::Info,
                 "Startup",
-                std::format( "Ready: {}x{}, {} frame contexts, {:.2f} MiB free",
+                std::format( "Ready: {}x{}, {} frame contexts, {:.2f} MiB free, shader code {} / {} KiB",
                              initialExtent.width,
                              initialExtent.height,
                              gpu::deko::Presenter::FrameCount,
-                             static_cast<double>( memoryReport.process_free_bytes ) / BytesPerMebibyte ),
+                             static_cast<double>( memoryReport.process_free_bytes ) / BytesPerMebibyte,
+                             shaderArenaSnapshot.allocations.used_bytes / 1024u,
+                             shaderArenaSnapshot.allocations.capacity_bytes / 1024u ),
                 startedAt );
     }
 
@@ -452,6 +489,7 @@ namespace doggo::game
     }
 
     bootstrapProgram.finalize();
+    shaderCodeArena.finalize();
     graphicsContext.finalize();
 
     const std::uint32_t romFsFinalizeResult = romFs.finalize();
@@ -472,10 +510,12 @@ namespace doggo::game
               std::format( "Application exiting with code {}", exitCode ),
               startedAt );
     logger.flush();
+
     if ( isRemoteLogAttached )
     {
       logger.detach( doggoDevSink );
     }
+
     doggoDevSink.finalize();
     return exitCode;
   }
